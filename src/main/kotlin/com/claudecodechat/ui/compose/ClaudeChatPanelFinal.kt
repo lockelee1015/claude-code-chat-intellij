@@ -142,7 +142,6 @@ class ClaudeChatPanelFinal(private val project: Project) {
                     primaryColor = primaryColor,
                     errorColor = errorColor,
                     isDarkTheme = isDarkTheme,
-                    onStop = { viewModel.stopCurrentRequest() },
                     lastMessage = lastSentMessage.value
                 )
             }
@@ -174,7 +173,6 @@ class ClaudeChatPanelFinal(private val project: Project) {
         primaryColor: Color,
         errorColor: Color,
         isDarkTheme: Boolean,
-        onStop: () -> Unit,
         lastMessage: String = ""
     ) {
         val infiniteTransition = rememberInfiniteTransition()
@@ -203,8 +201,7 @@ class ClaudeChatPanelFinal(private val project: Project) {
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -243,23 +240,6 @@ class ClaudeChatPanelFinal(private val project: Project) {
                             )
                         }
                     }
-                }
-                
-                // Stop button
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(errorColor.copy(alpha = 0.1f))
-                        .border(1.dp, errorColor.copy(alpha = 0.3f), RoundedCornerShape(4.dp))
-                        .clickable { onStop() }
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                ) {
-                    SimpleText(
-                        text = "Stop",
-                        color = errorColor,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium
-                    )
                 }
             }
             
