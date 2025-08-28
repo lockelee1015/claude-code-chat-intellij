@@ -19,6 +19,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.foundation.Canvas
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -208,20 +212,11 @@ class ClaudeChatPanelFinal(private val project: Project) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     // Animated Claude icon
-                    Box(
-                        modifier = Modifier
-                            .size(20.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(Color(0xFFD97757).copy(alpha = pulseAlpha * 0.2f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        SimpleText(
-                            text = "Ͻ",
-                            color = Color(0xFFD97757).copy(alpha = pulseAlpha),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+                    ClaudeIcon(
+                        modifier = Modifier.size(24.dp),
+                        color = Color(0xFFD97757),
+                        alpha = pulseAlpha
+                    )
                     
                     Column {
                         SimpleText(
@@ -1533,6 +1528,46 @@ class ClaudeChatPanelFinal(private val project: Project) {
                     )
                 }
             }
+        }
+    }
+    
+    @Composable
+    private fun ClaudeIcon(
+        modifier: Modifier = Modifier,
+        color: Color = Color(0xFFD97757),
+        alpha: Float = 1f
+    ) {
+        Canvas(modifier = modifier) {
+            val centerX = size.width / 2
+            val centerY = size.height / 2
+            val radius = size.minDimension / 2
+            
+            // Draw a simplified version of Claude logo
+            // This creates a star-like pattern similar to the SVG
+            val path = Path().apply {
+                val points = 12
+                val outerRadius = radius * 0.9f
+                val innerRadius = radius * 0.4f
+                
+                for (i in 0 until points) {
+                    val angle = (i * 30f - 90f) * (Math.PI / 180f).toFloat()
+                    val r = if (i % 2 == 0) outerRadius else innerRadius
+                    val x = centerX + r * kotlin.math.cos(angle)
+                    val y = centerY + r * kotlin.math.sin(angle)
+                    
+                    if (i == 0) {
+                        moveTo(x, y)
+                    } else {
+                        lineTo(x, y)
+                    }
+                }
+                close()
+            }
+            
+            drawPath(
+                path = path,
+                color = color.copy(alpha = alpha)
+            )
         }
     }
     
