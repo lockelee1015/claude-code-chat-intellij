@@ -217,10 +217,13 @@ class SessionViewModel(private val project: Project) : Disposable {
                 logger.error("Error sending prompt", e)
                 errorList.add("Failed to send prompt: ${e.message}")
                 updateMetrics { it.copy(errorsEncountered = it.errorsEncountered + 1) }
-            } finally {
-                // Ensure loading state is properly reset
+                // Only reset loading state on error
                 _isLoading.value = false
-                logger.info("Loading state set to false")
+                logger.info("Loading state set to false due to error")
+            } finally {
+                // Don't reset loading state here - let the completion signal handle it
+                // The loading state will be reset when we receive the "complete" signal
+                // or when the user calls stopCurrentRequest()
                 processNextQueuedPrompt()
             }
         }.apply {

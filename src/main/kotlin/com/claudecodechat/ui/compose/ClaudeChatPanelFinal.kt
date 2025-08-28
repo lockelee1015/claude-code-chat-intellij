@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.*
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -71,6 +72,12 @@ class ClaudeChatPanelFinal(private val project: Project) {
         val isLoading by viewModel.isLoading.collectAsState()
         val currentSession by viewModel.currentSession.collectAsState()
         val metrics by viewModel.sessionMetrics.collectAsState()
+        
+        // Log loading state changes
+        LaunchedEffect(isLoading) {
+            com.intellij.openapi.diagnostic.Logger.getInstance(ClaudeChatPanelFinal::class.java)
+                .info("UI Loading state changed to: $isLoading")
+        }
         
         // Adaptive theme colors
         val isDarkTheme = JBColor.isBright().not()
