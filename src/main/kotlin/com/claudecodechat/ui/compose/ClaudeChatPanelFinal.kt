@@ -52,6 +52,8 @@ import com.claudecodechat.models.MessageType
 import com.claudecodechat.state.SessionViewModel
 import com.intellij.openapi.project.Project
 import com.intellij.ui.JBColor
+import com.intellij.openapi.fileEditor.FileEditorManager
+import androidx.compose.runtime.DisposableEffect
 import javax.swing.JComponent
 import kotlin.math.sin
 import com.vladsch.flexmark.html.HtmlRenderer
@@ -1453,6 +1455,38 @@ class ClaudeChatPanelFinal(private val project: Project) {
         var selectedModel by remember { mutableStateOf("auto") }
         var modelDropdownExpanded by remember { mutableStateOf(false) }
         val focusRequester = remember { FocusRequester() }
+        
+        // Get current editor file context
+        var currentFile by remember { mutableStateOf<String?>(null) }
+        
+        // Set up editor listener
+        DisposableEffect(Unit) {
+            val fileEditorManager = FileEditorManager.getInstance(project)
+            
+            // Initial file
+            currentFile = fileEditorManager.selectedEditor?.file?.presentableName
+            
+            // Listen for file editor changes
+            val listener = object : com.intellij.openapi.fileEditor.FileEditorManagerListener {
+                override fun fileOpened(source: FileEditorManager, file: com.intellij.openapi.vfs.VirtualFile) {
+                    currentFile = file.presentableName
+                }
+                
+                override fun selectionChanged(event: com.intellij.openapi.fileEditor.FileEditorManagerEvent) {
+                    currentFile = event.newFile?.presentableName
+                }
+            }
+            
+            val connection = project.messageBus.connect()
+            connection.subscribe(
+                com.intellij.openapi.fileEditor.FileEditorManagerListener.FILE_EDITOR_MANAGER,
+                listener
+            )
+            
+            onDispose {
+                connection.dispose()
+            }
+        }
 
         Column(
             modifier = Modifier
@@ -1508,7 +1542,9 @@ class ClaudeChatPanelFinal(private val project: Project) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // Left side: Add button and file context
                 Row(
+                    modifier = Modifier.weight(1f),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -1534,7 +1570,48 @@ class ClaudeChatPanelFinal(private val project: Project) {
                         )
                     }
                     
-                    // Model selector
+                    // Current file context display
+                    if (currentFile != null) {
+                        Box(
+                            modifier = Modifier
+                                .height(32.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(primaryColor.copy(alpha = 0.05f))
+                                .border(
+                                    width = 1.dp,
+                                    color = primaryColor.copy(alpha = 0.2f),
+                                    shape = RoundedCornerShape(8.dp)
+                                )
+                                .padding(horizontal = 12.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                SimpleText(
+                                    text = "F",
+                                    color = primaryColor,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                SimpleText(
+                                    text = currentFile ?: "",
+                                    color = primaryColor.copy(alpha = 0.8f),
+                                    fontSize = 12.sp,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                }
+                
+                // Right side: Model selector and Send button
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Model selector moved to right side
                     Box {
                         Box(
                             modifier = Modifier
