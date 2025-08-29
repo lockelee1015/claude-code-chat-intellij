@@ -60,6 +60,7 @@ data class Message(
 data class Content(
     val type: ContentType,
     val text: String? = null,
+    val source: Map<String, String>? = null, // For image content
     val id: String? = null,
     val name: String? = null,
     val input: JsonElement? = null,
@@ -74,6 +75,8 @@ data class Content(
 enum class ContentType {
     @SerialName("text")
     TEXT,
+    @SerialName("image")
+    IMAGE,
     @SerialName("tool_use")
     TOOL_USE,
     @SerialName("tool_result")

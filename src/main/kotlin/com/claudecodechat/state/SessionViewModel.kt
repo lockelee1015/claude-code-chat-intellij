@@ -4,6 +4,7 @@ import com.claudecodechat.cli.ClaudeCliService
 import com.claudecodechat.models.ClaudeStreamMessage
 import com.claudecodechat.models.MessageType
 import com.claudecodechat.models.SessionMetrics
+import com.claudecodechat.models.ImageAttachment
 import com.claudecodechat.persistence.SessionPersistence
 import com.claudecodechat.session.SessionHistoryLoader
 import com.claudecodechat.session.SessionFileWatcher
@@ -152,6 +153,10 @@ class SessionViewModel(private val project: Project) : Disposable {
     private val _queuedPrompts = MutableStateFlow<List<QueuedPrompt>>(emptyList())
     val queuedPrompts: StateFlow<List<QueuedPrompt>> = _queuedPrompts.asStateFlow()
     
+    // Image attachments for the current message
+    private val _attachedImages = MutableStateFlow<List<ImageAttachment>>(emptyList())
+    val attachedImages: StateFlow<List<ImageAttachment>> = _attachedImages.asStateFlow()
+    
     // Use a simple list for errors that can be accessed without suspend
     private val errorList = mutableListOf<String>()
     
@@ -176,24 +181,51 @@ class SessionViewModel(private val project: Project) : Disposable {
         
         currentThread = Thread {
             try {
+                // Build content list with images and text
+                val contentList = mutableListOf<com.claudecodechat.models.Content>()
+                
+                // Add images first (Claude prefers images before text)
+                val images = _attachedImages.value
+                images.forEach { image ->
+                    contentList.add(
+                        com.claudecodechat.models.Content(
+                            type = com.claudecodechat.models.ContentType.IMAGE,
+                            source = mapOf(
+                                "type" to "base64",
+                                "media_type" to image.mediaType,
+                                "data" to image.base64Data
+                            )
+                        )
+                    )
+                }
+                
+                // Add text content
+                contentList.add(
+                    com.claudecodechat.models.Content(
+                        type = com.claudecodechat.models.ContentType.TEXT,
+                        text = prompt
+                    )
+                )
+                
                 // Add user message to the list
                 addMessage(ClaudeStreamMessage(
                     type = MessageType.USER,
                     message = com.claudecodechat.models.Message(
                         role = "user",
-                        content = listOf(
-                            com.claudecodechat.models.Content(
-                                type = com.claudecodechat.models.ContentType.TEXT,
-                                text = prompt
-                            )
-                        )
+                        content = contentList
                     )
                 ))
+                
+                // Store images before clearing for CLI transmission
+                val imagesToSend = images.toList()
+                
+                // Clear attached images after adding to message
+                clearImages()
                 
                 // Update metrics
                 updateMetrics { it.copy(promptsSent = it.promptsSent + 1) }
                 
-                // Prepare execution options
+                // Prepare execution options with images
                 val options = ClaudeCliService.ExecuteOptions(
                     prompt = prompt,
                     model = model,
@@ -201,7 +233,8 @@ class SessionViewModel(private val project: Project) : Disposable {
                     resume = false,
                     continueSession = _currentSession.value != null,
                     verbose = true,
-                    skipPermissions = true
+                    skipPermissions = true,
+                    images = imagesToSend
                 )
                 
                 // Execute Claude Code CLI with callback
@@ -327,6 +360,9 @@ class SessionViewModel(private val project: Project) : Disposable {
                                 }
                             }
                         }
+                    }
+                    com.claudecodechat.models.ContentType.IMAGE -> {
+                        // Images don't need special metric tracking for now
                     }
                 }
             }
@@ -586,6 +622,47 @@ class SessionViewModel(private val project: Project) : Disposable {
     
     fun clearErrors() {
         errorList.clear()
+    }
+    
+    /**
+     * Add an image attachment
+     */
+    fun addImage(image: ImageAttachment) {
+        val currentImages = _attachedImages.value.toMutableList()
+        // Update display ID based on current count
+        val updatedImage = image.copy(displayId = currentImages.size + 1)
+        currentImages.add(updatedImage)
+        _attachedImages.value = currentImages
+        logger.info("Added image attachment: ${updatedImage.getPlaceholder()}, size: ${updatedImage.sizeBytes} bytes")
+    }
+    
+    /**
+     * Remove an image attachment by ID
+     */
+    fun removeImage(imageId: String) {
+        val currentImages = _attachedImages.value.toMutableList()
+        currentImages.removeAll { it.id == imageId }
+        // Re-number remaining images
+        currentImages.forEachIndexed { index, image ->
+            currentImages[index] = image.copy(displayId = index + 1)
+        }
+        _attachedImages.value = currentImages
+        logger.info("Removed image attachment: $imageId")
+    }
+    
+    /**
+     * Clear all image attachments
+     */
+    fun clearImages() {
+        _attachedImages.value = emptyList()
+        logger.info("Cleared all image attachments")
+    }
+    
+    /**
+     * Get image placeholders for text display
+     */
+    fun getImagePlaceholders(): String {
+        return _attachedImages.value.joinToString(" ") { it.getPlaceholder() }
     }
     
     fun stopCurrentRequest() {

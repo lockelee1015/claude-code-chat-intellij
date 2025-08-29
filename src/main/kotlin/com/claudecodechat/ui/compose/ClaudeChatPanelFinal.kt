@@ -9,6 +9,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.*
@@ -27,6 +29,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.foundation.Canvas
@@ -50,7 +54,9 @@ import com.claudecodechat.models.ClaudeStreamMessage
 import com.claudecodechat.models.SessionMetrics
 import com.claudecodechat.models.ContentType
 import com.claudecodechat.models.MessageType
+import com.claudecodechat.models.ImageAttachment
 import com.claudecodechat.state.SessionViewModel
+import com.claudecodechat.utils.ClipboardImageHandler
 import com.intellij.openapi.project.Project
 import com.intellij.ui.JBColor
 import com.intellij.openapi.fileEditor.FileEditorManager
@@ -71,6 +77,8 @@ import com.vladsch.flexmark.util.ast.VisitHandler
 import kotlin.math.PI
 import kotlinx.serialization.json.*
 import kotlinx.serialization.json.JsonElement
+import org.jetbrains.skia.Image as SkiaImage
+import java.util.Base64
 
 /**
  * Final version of Claude Chat Panel with all improvements
@@ -99,6 +107,7 @@ class ClaudeChatPanelFinal(private val project: Project) {
         val isLoading by viewModel.isLoading.collectAsState()
         val currentSession by viewModel.currentSession.collectAsState()
         val metrics by viewModel.sessionMetrics.collectAsState()
+        val attachedImages by viewModel.attachedImages.collectAsState()
         
         // Completion state
         val completionManager = remember { com.claudecodechat.completion.CompletionManager(project) }
@@ -215,6 +224,9 @@ class ClaudeChatPanelFinal(private val project: Project) {
                     inputTextValue = newValue
                     completionManager.updateCompletion(newValue.text, newValue.selection.end)
                 },
+                attachedImages = attachedImages,
+                onAddImage = { image -> viewModel.addImage(image) },
+                onRemoveImage = { imageId -> viewModel.removeImage(imageId) },
                 completionManager = completionManager,
                 completionState = completionState,
                 onSendMessage = { prompt, model ->
@@ -264,8 +276,13 @@ class ClaudeChatPanelFinal(private val project: Project) {
                     com.intellij.openapi.diagnostic.Logger.getInstance(ClaudeChatPanelFinal::class.java)
                         .info("Sending message from UI: $finalMessage")
                     lastSentMessage.value = finalMessage
+                    
+                    // Send with images (they're already in viewModel's state)
                     viewModel.sendPrompt(finalMessage, model)
+                    
+                    // Clear input and images after sending
                     inputTextValue = TextFieldValue("")
+                    viewModel.clearImages()
                     completionManager.hideCompletion()
                 },
                 onStop = { viewModel.stopCurrentRequest() },
@@ -955,6 +972,19 @@ class ClaudeChatPanelFinal(private val project: Project) {
                                             codeBlockBg = codeBlockBg
                                         )
                                     }
+                                    ContentType.IMAGE -> {
+                                        // Display image in message
+                                        content.source?.let { source ->
+                                            if (source["type"] == "base64" && source["data"] != null) {
+                                                ImageMessageDisplay(
+                                                    base64Data = source["data"] ?: "",
+                                                    mediaType = source["media_type"] ?: "image/png",
+                                                    textColor = textColor,
+                                                    borderColor = if (isDarkTheme) Color(0xFF3C3F41) else Color(0xFFD1D1D1)
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                                 Spacer(modifier = Modifier.height(4.dp))
                             }
@@ -1599,11 +1629,176 @@ class ClaudeChatPanelFinal(private val project: Project) {
     }
     
     @Composable
+    private fun ImageMessageDisplay(
+        base64Data: String,
+        mediaType: String,
+        textColor: Color,
+        borderColor: Color
+    ) {
+        // Decode base64 to display image - do this outside composable scope
+        val imageBitmap = remember(base64Data) {
+            try {
+                val imageBytes = Base64.getDecoder().decode(base64Data)
+                val skiaImage = SkiaImage.makeFromEncoded(imageBytes)
+                skiaImage.toComposeImageBitmap()
+            } catch (e: Exception) {
+                null
+            }
+        }
+        
+        if (imageBitmap != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .border(
+                        width = 1.dp,
+                        color = borderColor,
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                    .background(Color.White)
+                    .padding(8.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Image(
+                    bitmap = imageBitmap,
+                    contentDescription = "Message image",
+                    modifier = Modifier
+                        .widthIn(max = 400.dp)
+                        .heightIn(max = 300.dp)
+                )
+            }
+        } else {
+            // Fallback for invalid image data
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(100.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(textColor.copy(alpha = 0.05f))
+                    .border(
+                        width = 1.dp,
+                        color = borderColor,
+                        shape = RoundedCornerShape(8.dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                SimpleText(
+                    text = "[Image: $mediaType]",
+                    color = textColor.copy(alpha = 0.5f),
+                    fontSize = 12.sp
+                )
+            }
+        }
+    }
+    
+    @Composable
+    private fun ImageAttachmentCard(
+        image: ImageAttachment,
+        onRemove: () -> Unit,
+        textColor: Color,
+        primaryColor: Color,
+        borderColor: Color,
+        isDarkTheme: Boolean
+    ) {
+        Column(
+            modifier = Modifier
+                .width(70.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(if (isDarkTheme) textColor.copy(alpha = 0.05f) else Color(0xFFF5F5F5))
+                .border(
+                    width = 1.dp,
+                    color = borderColor,
+                    shape = RoundedCornerShape(6.dp)
+                )
+                .padding(6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Thumbnail
+            Box(
+                modifier = Modifier
+                    .size(50.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color.White),
+                contentAlignment = Alignment.Center
+            ) {
+                if (image.thumbnailBitmap != null) {
+                    Image(
+                        bitmap = image.thumbnailBitmap,
+                        contentDescription = "Image attachment",
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    // Fallback placeholder
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(textColor.copy(alpha = 0.1f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        SimpleText(
+                            text = "IMG",
+                            color = textColor.copy(alpha = 0.5f),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+                
+                // Remove button overlay
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = 3.dp, y = (-3).dp)
+                        .size(16.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFDB5860))
+                        .clickable { onRemove() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    SimpleText(
+                        text = "×",
+                        color = Color.White,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(2.dp))
+            
+            // Image placeholder text
+            SimpleText(
+                text = image.getPlaceholder(),
+                color = primaryColor,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Medium
+            )
+            
+            // Size indicator
+            val sizeText = when {
+                image.sizeBytes < 1024 -> "${image.sizeBytes} B"
+                image.sizeBytes < 1024 * 1024 -> "${image.sizeBytes / 1024} KB"
+                else -> "${image.sizeBytes / (1024 * 1024)} MB"
+            }
+            SimpleText(
+                text = sizeText,
+                color = textColor.copy(alpha = 0.5f),
+                fontSize = 8.sp
+            )
+        }
+    }
+    
+    @Composable
     private fun InputArea(
         enabled: Boolean,
         isLoading: Boolean,
         inputTextValue: TextFieldValue,
         onInputChange: (TextFieldValue) -> Unit,
+        attachedImages: List<ImageAttachment>,
+        onAddImage: (ImageAttachment) -> Unit,
+        onRemoveImage: (String) -> Unit,
         completionManager: com.claudecodechat.completion.CompletionManager,
         completionState: com.claudecodechat.completion.CompletionState,
         onSendMessage: (String, String) -> Unit,
@@ -1681,12 +1876,55 @@ class ClaudeChatPanelFinal(private val project: Project) {
                 .fillMaxWidth()
                 .padding(12.dp)
         ) {
+            // Image preview area
+            if (attachedImages.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    attachedImages.forEach { image ->
+                        ImageAttachmentCard(
+                            image = image,
+                            onRemove = { onRemoveImage(image.id) },
+                            textColor = textColor,
+                            primaryColor = primaryColor,
+                            borderColor = borderColor,
+                            isDarkTheme = isDarkTheme
+                        )
+                    }
+                }
+            }
+            
             // Multi-line input field with keyboard handling
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 80.dp, max = 200.dp)
                     .onPreviewKeyEvent { keyEvent ->
+                        // Handle paste (Ctrl+V / Cmd+V)
+                        if ((keyEvent.isCtrlPressed || keyEvent.isMetaPressed) && 
+                            keyEvent.key == Key.V && 
+                            keyEvent.type == KeyEventType.KeyDown) {
+                            // Check if clipboard has an image
+                            val image = ClipboardImageHandler.extractImageFromClipboard()
+                            if (image != null && attachedImages.size < 20) {
+                                onAddImage(image)
+                                // Insert placeholder text at cursor position
+                                val currentText = inputTextValue.text
+                                val cursorPos = inputTextValue.selection.end
+                                val placeholder = image.getPlaceholder()
+                                val newText = currentText.substring(0, cursorPos) + 
+                                             placeholder + 
+                                             currentText.substring(cursorPos)
+                                onInputChange(TextFieldValue(
+                                    text = newText,
+                                    selection = TextRange(cursorPos + placeholder.length)
+                                ))
+                                return@onPreviewKeyEvent true
+                            }
+                        }
                         handleKeyEvent(keyEvent, completionState, completionManager, inputTextValue, onInputChange)
                     }
                     .clip(RoundedCornerShape(12.dp))

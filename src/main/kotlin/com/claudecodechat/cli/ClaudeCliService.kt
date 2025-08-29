@@ -49,7 +49,8 @@ class ClaudeCliService(private val project: Project) {
         val continueSession: Boolean = false,
         val verbose: Boolean = true,
         val skipPermissions: Boolean = true,
-        val customArgs: List<String> = emptyList()
+        val customArgs: List<String> = emptyList(),
+        val images: List<com.claudecodechat.models.ImageAttachment> = emptyList()
     )
     
     
@@ -67,7 +68,25 @@ class ClaudeCliService(private val project: Project) {
         
         logger.info("Executing Claude Code CLI:")
         logger.info("  Binary: $claudeBinary")
-        logger.info("  Args: $args")
+        logger.info("  Has images: ${options.images.isNotEmpty()}")
+        if (options.images.isNotEmpty()) {
+            logger.info("  Image count: ${options.images.size}")
+            options.images.forEachIndexed { index, image ->
+                logger.info("  Image ${index + 1}: ${image.mediaType}, ${image.sizeBytes} bytes")
+            }
+        }
+        logger.info("  Args count: ${args.size}")
+        args.forEachIndexed { index, arg ->
+            // Truncate long arguments (like base64 data) for logging
+            val logArg = if (arg.length > 200 && arg.contains("base64")) {
+                "${arg.substring(0, 100)}...[TRUNCATED BASE64 DATA]...${arg.substring(arg.length - 50)}"
+            } else if (arg.length > 500) {
+                "${arg.substring(0, 200)}...[TRUNCATED]..."
+            } else {
+                arg
+            }
+            logger.info("  Arg[$index]: $logArg")
+        }
         logger.info("  Working directory: $projectPath")
         
         try {
@@ -291,13 +310,75 @@ class ClaudeCliService(private val project: Project) {
             args.add("--dangerously-skip-permissions")
         }
         
-        // Add prompt last (as a positional argument)
-        args.add(options.prompt)
+        // When images are present, we need to use input-format=stream-json
+        if (options.images.isNotEmpty()) {
+            args.add("--input-format")
+            args.add("stream-json")
+            
+            // Build JSON message with images
+            val contentArray = mutableListOf<Map<String, Any>>()
+            
+            // Add images first (Claude prefers images before text)
+            options.images.forEach { image ->
+                contentArray.add(mapOf(
+                    "type" to "image",
+                    "source" to mapOf(
+                        "type" to "base64",
+                        "media_type" to image.mediaType,
+                        "data" to image.base64Data
+                    )
+                ))
+            }
+            
+            // Add text content
+            contentArray.add(mapOf(
+                "type" to "text",
+                "text" to options.prompt
+            ))
+            
+            // Create the complete JSON message
+            val jsonMessage = mapOf(
+                "type" to "user",
+                "message" to mapOf(
+                    "role" to "user",
+                    "content" to contentArray
+                )
+            )
+            
+            // Convert to JSON string
+            val jsonString = kotlinx.serialization.json.Json.encodeToString(
+                kotlinx.serialization.json.JsonElement.serializer(),
+                buildJsonElement(jsonMessage)
+            )
+            
+            // Add the JSON as the prompt argument
+            args.add(jsonString)
+        } else {
+            // Simple text prompt
+            args.add(options.prompt)
+        }
         
         // Custom args
         args.addAll(options.customArgs)
         
         return args
+    }
+    
+    private fun buildJsonElement(value: Any): kotlinx.serialization.json.JsonElement {
+        return when (value) {
+            is String -> kotlinx.serialization.json.JsonPrimitive(value)
+            is Number -> kotlinx.serialization.json.JsonPrimitive(value)
+            is Boolean -> kotlinx.serialization.json.JsonPrimitive(value)
+            is Map<*, *> -> kotlinx.serialization.json.JsonObject(
+                value.entries.associate { (k, v) ->
+                    k.toString() to buildJsonElement(v!!)
+                }
+            )
+            is List<*> -> kotlinx.serialization.json.JsonArray(
+                value.map { buildJsonElement(it!!) }
+            )
+            else -> kotlinx.serialization.json.JsonNull
+        }
     }
     
     private fun findClaudeBinary(): String {

@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+## [1.0.4] - 2025-08-29
+### Added
+- Image paste support - users can now paste screenshots directly into the input field
+- Image preview cards with thumbnails and remove buttons
+- Support for sending images to Claude CLI using JSON format
+- Detailed logging for image transmission to help with debugging
+- GitHub Actions disk space cleanup to fix verification issues
+
+### Improved
+- Reduced image preview card size for better UI space utilization
+- Enhanced error logging for CLI commands with image data
+
+### Fixed
+- Image data not being sent to Claude CLI correctly
+- GitHub Actions verification failing due to insufficient disk space
+
 ## [1.0.3] - 2025-08-29
 ### Added
 - IDE context awareness - automatically includes current file and selected lines in messages
