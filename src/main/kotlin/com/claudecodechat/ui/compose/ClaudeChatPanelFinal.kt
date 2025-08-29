@@ -334,14 +334,37 @@ class ClaudeChatPanelFinal(private val project: Project) {
                             fontSize = 13.sp
                         )
                         if (lastMessage.isNotEmpty()) {
-                            val summary = if (lastMessage.length > 50) 
-                                lastMessage.take(47) + "..." 
-                            else lastMessage
-                            SimpleText(
-                                text = summary,
-                                color = textColor.copy(alpha = 0.5f),
-                                fontSize = 11.sp
-                            )
+                            // Extract just the first line of the message, excluding IDE context
+                            val cleanMessage = lastMessage
+                                .substringBefore("\n\nSelected code:")
+                                .substringBefore("\n\n[IDE Context:")
+                                .lines()
+                                .firstOrNull()
+                                ?.trim() ?: ""
+                            
+                            if (cleanMessage.isNotEmpty()) {
+                                val summary = if (cleanMessage.length > 50) 
+                                    cleanMessage.take(47) + "..." 
+                                else cleanMessage
+                                SimpleText(
+                                    text = summary,
+                                    color = textColor.copy(alpha = 0.5f),
+                                    fontSize = 11.sp,
+                                    maxLines = 1
+                                )
+                            }
+                            
+                            // Show IDE context indicator separately if present
+                            val contextPattern = "\\[IDE Context: ([^\\]]+)\\]".toRegex()
+                            val contextMatch = contextPattern.find(lastMessage)
+                            if (contextMatch != null) {
+                                SimpleText(
+                                    text = "[IDE Context: User is in...]",
+                                    color = textColor.copy(alpha = 0.4f),
+                                    fontSize = 11.sp,
+                                    maxLines = 1
+                                )
+                            }
                         }
                     }
                 }
