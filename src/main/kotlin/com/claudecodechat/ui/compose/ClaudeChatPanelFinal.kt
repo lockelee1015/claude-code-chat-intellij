@@ -30,6 +30,8 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -1014,6 +1016,150 @@ class ClaudeChatPanelFinal(private val project: Project) {
     }
     
     @Composable
+    private fun EditToolContent(
+        input: Any?,
+        textColor: Color,
+        primaryColor: Color,
+        codeBlockBg: Color,
+        isExpanded: Boolean,
+        onToggleExpanded: () -> Unit
+    ) {
+        // Extract old_string and new_string from input
+        val (oldString, newString) = when (input) {
+            is JsonElement -> {
+                try {
+                    val obj = input.jsonObject
+                    val old = obj["old_string"]?.jsonPrimitive?.content ?: ""
+                    val new = obj["new_string"]?.jsonPrimitive?.content ?: ""
+                    old to new
+                } catch (e: Exception) {
+                    val old = extractParameter(input.toString(), "old_string")
+                    val new = extractParameter(input.toString(), "new_string")
+                    old to new
+                }
+            }
+            else -> {
+                val old = extractParameter(input.toString(), "old_string")
+                val new = extractParameter(input.toString(), "new_string")
+                old to new
+            }
+        }
+        
+        // Process lines for diff display
+        val oldLines = oldString.lines()
+        val newLines = newString.lines()
+        val maxLines = maxOf(oldLines.size, newLines.size)
+        
+        // Determine if we need expand/collapse
+        val shouldShowToggle = maxLines > 5
+        val displayLineCount = if (isExpanded || !shouldShowToggle) maxLines else 3
+        
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 28.dp, top = 4.dp)
+        ) {
+            // Show diff-like display
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(codeBlockBg.copy(alpha = 0.5f))
+                    .padding(8.dp)
+            ) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    // Show removed lines
+                    if (oldString.isNotEmpty()) {
+                        val linesToShow = if (isExpanded || !shouldShowToggle) oldLines else oldLines.take(displayLineCount)
+                        linesToShow.forEachIndexed { index, line ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                SimpleText(
+                                    text = "-",
+                                    color = Color(0xFFFF6B6B),
+                                    fontSize = 12.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                SimpleText(
+                                    text = line.ifEmpty { " " },
+                                    color = Color(0xFFFF6B6B).copy(alpha = 0.9f),
+                                    fontSize = 12.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                        }
+                        if (!isExpanded && shouldShowToggle && oldLines.size > displayLineCount) {
+                            SimpleText(
+                                text = "  ... ${oldLines.size - displayLineCount} more lines removed",
+                                color = textColor.copy(alpha = 0.5f),
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+                    
+                    // Add spacing between old and new if both exist
+                    if (oldString.isNotEmpty() && newString.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
+                    
+                    // Show added lines
+                    if (newString.isNotEmpty()) {
+                        val linesToShow = if (isExpanded || !shouldShowToggle) newLines else newLines.take(displayLineCount)
+                        linesToShow.forEachIndexed { index, line ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                SimpleText(
+                                    text = "+",
+                                    color = Color(0xFF4CAF50),
+                                    fontSize = 12.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                SimpleText(
+                                    text = line.ifEmpty { " " },
+                                    color = Color(0xFF4CAF50).copy(alpha = 0.9f),
+                                    fontSize = 12.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                        }
+                        if (!isExpanded && shouldShowToggle && newLines.size > displayLineCount) {
+                            SimpleText(
+                                text = "  ... ${newLines.size - displayLineCount} more lines added",
+                                color = textColor.copy(alpha = 0.5f),
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+                }
+            }
+            
+            // Show more/less toggle if needed
+            if (shouldShowToggle) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Box(
+                    modifier = Modifier.clickable { onToggleExpanded() }
+                ) {
+                    SimpleText(
+                        text = if (isExpanded) "show less" else "show more",
+                        color = primaryColor,
+                        fontSize = 11.sp
+                    )
+                }
+            }
+        }
+    }
+    
+    @Composable
     private fun ToolUseCard(
         toolName: String,
         toolId: String,
@@ -1054,7 +1200,8 @@ class ClaudeChatPanelFinal(private val project: Project) {
                     SimpleText(
                         text = getToolIcon(toolName),
                         color = getToolColor(toolName),
-                        fontSize = 12.sp
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
                     )
                 }
                 
@@ -1097,6 +1244,17 @@ class ClaudeChatPanelFinal(private val project: Project) {
                                 )
                             }
                         }
+                    }
+                    toolName.contains("Edit", ignoreCase = true) && !toolName.contains("MultiEdit", ignoreCase = true) -> {
+                        // For Edit tool, show diff-like display
+                        EditToolContent(
+                            input = input,
+                            textColor = textColor,
+                            primaryColor = primaryColor,
+                            codeBlockBg = codeBlockBg,
+                            isExpanded = isExpanded,
+                            onToggleExpanded = { isExpanded = !isExpanded }
+                        )
                     }
                     toolName.contains("Write", ignoreCase = true) || 
                     toolName.contains("MultiEdit", ignoreCase = true) -> {
@@ -1736,18 +1894,19 @@ class ClaudeChatPanelFinal(private val project: Project) {
     
     private fun getToolIcon(toolName: String): String {
         return when {
-            toolName.contains("Read", ignoreCase = true) -> "📖"
-            toolName.contains("Write", ignoreCase = true) -> "✏️"
-            toolName.contains("Edit", ignoreCase = true) -> "📝"
-            toolName.contains("Search", ignoreCase = true) -> "🔍"
-            toolName.contains("Grep", ignoreCase = true) -> "🔎"
-            toolName.contains("Bash", ignoreCase = true) -> "💻"
-            toolName.contains("Task", ignoreCase = true) -> "📋"
-            toolName.contains("Todo", ignoreCase = true) -> "✅"
-            toolName.contains("Web", ignoreCase = true) -> "🌐"
-            toolName.contains("Glob", ignoreCase = true) -> "📁"
-            toolName.contains("LS", ignoreCase = true) -> "📂"
-            else -> "🔧"
+            toolName.contains("Read", ignoreCase = true) -> "R"
+            toolName.contains("Write", ignoreCase = true) -> "W"
+            toolName.contains("Edit", ignoreCase = true) -> "E"
+            toolName.contains("MultiEdit", ignoreCase = true) -> "M"
+            toolName.contains("Search", ignoreCase = true) -> "S"
+            toolName.contains("Grep", ignoreCase = true) -> "G"
+            toolName.contains("Bash", ignoreCase = true) -> ">"
+            toolName.contains("Task", ignoreCase = true) -> "T"
+            toolName.contains("Todo", ignoreCase = true) -> "✓"
+            toolName.contains("Web", ignoreCase = true) -> "@"
+            toolName.contains("Glob", ignoreCase = true) -> "*"
+            toolName.contains("LS", ignoreCase = true) -> "L"
+            else -> "•"
         }
     }
     
