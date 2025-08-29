@@ -2,7 +2,6 @@
 .gradle/
 build/
 gradle-app.setting
-!gradle-wrapper.jar
 .gradletasknamecache
 
 # IntelliJ IDEA
@@ -28,6 +27,9 @@ logs/
 *.zip
 *.tar.gz
 *.rar
+
+# Exception for gradle wrapper
+!gradle/wrapper/gradle-wrapper.jar
 
 # Virtual Machine Crash Logs
 hs_err_pid*
