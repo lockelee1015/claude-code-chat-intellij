@@ -1,6 +1,8 @@
 import org.jetbrains.changelog.Changelog
 import org.jetbrains.changelog.markdownToHTML
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
+import org.jetbrains.intellij.platform.gradle.IntelliJPlatformType
+import org.jetbrains.intellij.platform.gradle.models.ProductRelease
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
 plugins {
@@ -109,6 +111,18 @@ intellijPlatform {
     publishing {
         token = System.getenv("PUBLISH_TOKEN")
         channels = listOf("default")
+    }
+    
+    pluginVerification {
+        ides {
+            recommended()
+            select {
+                types = listOf(IntelliJPlatformType.IntellijIdeaCommunity)
+                channels = listOf(ProductRelease.Channel.RELEASE)
+                sinceBuild = "241"
+                untilBuild = "242.*"
+            }
+        }
     }
 }
 

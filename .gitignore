@@ -4,6 +4,9 @@ build/
 gradle-app.setting
 .gradletasknamecache
 
+# IntelliJ Platform
+.intellijPlatform/
+
 # IntelliJ IDEA
 .idea/
 *.iml
