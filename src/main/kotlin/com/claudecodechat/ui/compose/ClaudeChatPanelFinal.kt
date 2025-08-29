@@ -12,7 +12,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.*
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.*
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import kotlinx.coroutines.launch
+import com.claudecodechat.completion.CompletionManager
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,6 +52,17 @@ import com.intellij.openapi.project.Project
 import com.intellij.ui.JBColor
 import javax.swing.JComponent
 import kotlin.math.sin
+import com.vladsch.flexmark.html.HtmlRenderer
+import com.vladsch.flexmark.parser.Parser
+import com.vladsch.flexmark.util.ast.Node
+import com.vladsch.flexmark.util.data.MutableDataSet
+import com.vladsch.flexmark.ext.gfm.strikethrough.StrikethroughExtension
+import com.vladsch.flexmark.ext.tables.TablesExtension
+import com.vladsch.flexmark.ext.autolink.AutolinkExtension
+import com.vladsch.flexmark.ext.gfm.tasklist.TaskListExtension
+import com.vladsch.flexmark.ast.*
+import com.vladsch.flexmark.util.ast.NodeVisitor
+import com.vladsch.flexmark.util.ast.VisitHandler
 import kotlin.math.PI
 import kotlinx.serialization.json.*
 import kotlinx.serialization.json.JsonElement
@@ -77,6 +95,11 @@ class ClaudeChatPanelFinal(private val project: Project) {
         val currentSession by viewModel.currentSession.collectAsState()
         val metrics by viewModel.sessionMetrics.collectAsState()
         
+        // Completion state
+        val completionManager = remember { com.claudecodechat.completion.CompletionManager(project) }
+        val completionState by completionManager.completionState.collectAsState()
+        var inputTextValue by remember { mutableStateOf(TextFieldValue("")) }
+        
         // Log loading state changes
         LaunchedEffect(isLoading) {
             com.intellij.openapi.diagnostic.Logger.getInstance(ClaudeChatPanelFinal::class.java)
@@ -94,12 +117,17 @@ class ClaudeChatPanelFinal(private val project: Project) {
         val borderColor = if (isDarkTheme) Color(0xFF4A9EFF).copy(alpha = 0.6f) else Color(0xFF4A9EFF).copy(alpha = 0.4f)
         val codeBlockBg = if (isDarkTheme) Color(0xFF1E1F22) else Color(0xFFF5F5F5)
         
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(backgroundColor)
-                .padding(8.dp)
         ) {
+            // Main chat content
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(8.dp)
+            ) {
             // Session Info Bar
             SessionInfoBar(
                 session = currentSession,
@@ -150,15 +178,47 @@ class ClaudeChatPanelFinal(private val project: Project) {
                 )
             }
             
+            
+
+            // Completion popup positioned just above input area
+            if (completionState.isShowing) {
+                CompletionPopup(
+                    completionState = completionState,
+                    onItemClick = { item ->
+                        val result = completionManager.acceptCompletion(
+                            inputTextValue.text,
+                            inputTextValue.selection.end
+                        )
+                        if (result != null) {
+                            inputTextValue = TextFieldValue(
+                                text = result.newText,
+                                selection = TextRange(result.newCursorPosition)
+                            )
+                        }
+                    },
+                    alignment = Alignment.BottomStart,
+                    offset = IntOffset(24, -280)
+                )
+            }
+
             // Input Area
             InputArea(
                 enabled = !isLoading,
                 isLoading = isLoading,
+                inputTextValue = inputTextValue,
+                onInputChange = { newValue ->
+                    inputTextValue = newValue
+                    completionManager.updateCompletion(newValue.text, newValue.selection.end)
+                },
+                completionManager = completionManager,
+                completionState = completionState,
                 onSendMessage = { prompt, model ->
                     com.intellij.openapi.diagnostic.Logger.getInstance(ClaudeChatPanelFinal::class.java)
                         .info("Sending message from UI: $prompt")
                     lastSentMessage.value = prompt
                     viewModel.sendPrompt(prompt, model)
+                    inputTextValue = TextFieldValue("")
+                    completionManager.hideCompletion()
                 },
                 onStop = { viewModel.stopCurrentRequest() },
                 textColor = textColor,
@@ -168,7 +228,8 @@ class ClaudeChatPanelFinal(private val project: Project) {
                 borderColor = borderColor,
                 isDarkTheme = isDarkTheme
             )
-        }
+            } // End of Column
+        } // End of Box
     }
     
     @Composable
@@ -1218,6 +1279,10 @@ class ClaudeChatPanelFinal(private val project: Project) {
     private fun InputArea(
         enabled: Boolean,
         isLoading: Boolean,
+        inputTextValue: TextFieldValue,
+        onInputChange: (TextFieldValue) -> Unit,
+        completionManager: com.claudecodechat.completion.CompletionManager,
+        completionState: com.claudecodechat.completion.CompletionState,
         onSendMessage: (String, String) -> Unit,
         onStop: () -> Unit,
         textColor: Color,
@@ -1227,20 +1292,23 @@ class ClaudeChatPanelFinal(private val project: Project) {
         borderColor: Color,
         isDarkTheme: Boolean
     ) {
-        var inputText by remember { mutableStateOf("") }
         var selectedModel by remember { mutableStateOf("auto") }
         var modelDropdownExpanded by remember { mutableStateOf(false) }
-        
+        val focusRequester = remember { FocusRequester() }
+
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(12.dp)
         ) {
-            // Multi-line input field
+            // Multi-line input field with keyboard handling
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 80.dp, max = 200.dp)
+                    .onPreviewKeyEvent { keyEvent ->
+                        handleKeyEvent(keyEvent, completionState, completionManager, inputTextValue, onInputChange)
+                    }
                     .clip(RoundedCornerShape(12.dp))
                     .background(inputBgColor)
                     .border(
@@ -1250,28 +1318,29 @@ class ClaudeChatPanelFinal(private val project: Project) {
                     )
                     .padding(12.dp)
             ) {
-                if (inputText.isEmpty()) {
-                    SimpleText(
-                        text = "Message Claude...",
-                        color = textColor.copy(alpha = 0.4f),
-                        fontSize = 14.sp
+                    if (inputTextValue.text.isEmpty()) {
+                        SimpleText(
+                            text = "Message Claude...",
+                            color = textColor.copy(alpha = 0.4f),
+                            fontSize = 14.sp
+                        )
+                    }
+                    BasicTextField(
+                        value = inputTextValue,
+                        onValueChange = onInputChange,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 56.dp)
+                            .focusRequester(focusRequester),
+                        textStyle = TextStyle(
+                            color = textColor,
+                            fontSize = 14.sp,
+                            lineHeight = 20.sp
+                        ),
+                        cursorBrush = SolidColor(primaryColor),
+                        enabled = enabled
                     )
                 }
-                BasicTextField(
-                    value = inputText,
-                    onValueChange = { inputText = it },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 56.dp),
-                    textStyle = TextStyle(
-                        color = textColor,
-                        fontSize = 14.sp,
-                        lineHeight = 20.sp
-                    ),
-                    cursorBrush = SolidColor(primaryColor),
-                    enabled = enabled
-                )
-            }
             
             Spacer(modifier = Modifier.height(8.dp))
             
@@ -1453,19 +1522,18 @@ class ClaudeChatPanelFinal(private val project: Project) {
                             .height(32.dp)
                             .clip(RoundedCornerShape(6.dp))
                             .background(
-                                if (inputText.isNotBlank()) primaryColor
+                                if (inputTextValue.text.isNotBlank()) primaryColor
                                 else if (isDarkTheme) Color(0xFF45494A) else Color(0xFFDFE1E5)
                             )
                             .then(
-                                if (!isDarkTheme && inputText.isNotBlank()) 
+                                if (!isDarkTheme && inputTextValue.text.isNotBlank()) 
                                     Modifier.border(1.dp, primaryColor.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
                                 else Modifier
                             )
-                            .clickable(enabled = inputText.isNotBlank()) {
-                                if (inputText.isNotBlank()) {
+                            .clickable(enabled = inputTextValue.text.isNotBlank()) {
+                                if (inputTextValue.text.isNotBlank()) {
                                     val modelToUse = if (selectedModel == "auto") "" else selectedModel
-                                    onSendMessage(inputText, modelToUse)
-                                    inputText = ""
+                                    onSendMessage(inputTextValue.text, modelToUse)
                                 }
                             }
                             .padding(horizontal = 16.dp),
@@ -1477,14 +1545,14 @@ class ClaudeChatPanelFinal(private val project: Project) {
                         ) {
                             SimpleText(
                                 text = "Send",
-                                color = if (inputText.isNotBlank()) Color.White
+                                color = if (inputTextValue.text.isNotBlank()) Color.White
                                 else if (isDarkTheme) Color(0xFF868A91) else Color(0xFF6F737A),
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Medium
                             )
                             SimpleText(
                                 text = "→",
-                                color = if (inputText.isNotBlank()) Color.White.copy(alpha = 0.9f)
+                                color = if (inputTextValue.text.isNotBlank()) Color.White.copy(alpha = 0.9f)
                                 else if (isDarkTheme) Color(0xFF868A91) else Color(0xFF6F737A),
                                 fontSize = 14.sp
                             )
@@ -1830,11 +1898,36 @@ class ClaudeChatPanelFinal(private val project: Project) {
     private fun formatToolInput(input: Any?): String {
         if (input == null) return "No parameters"
         val str = input.toString()
-        // Format as key-value pairs
+        
+        // Special formatting for Edit tool
+        if (str.contains("old_string=") && str.contains("new_string=")) {
+            return formatEditToolInput(str)
+        }
+        
+        // Format as key-value pairs for other tools
         return str.replace(", ", "\n")
             .replace("=", ": ")
             .replace("{", "")
             .replace("}", "")
+    }
+    
+    private fun formatEditToolInput(input: String): String {
+        val oldStringMatch = "old_string=(.+?), new_string=".toRegex().find(input)
+        val newStringMatch = "new_string=(.+?)(?:, \\w+=|$)".toRegex().find(input)
+        
+        val oldString = oldStringMatch?.groupValues?.get(1) ?: ""
+        val newString = newStringMatch?.groupValues?.get(1) ?: ""
+        
+        fun formatStringPreview(str: String, label: String): String {
+            val lines = str.lines()
+            return if (lines.size <= 3) {
+                "$label:\n$str"
+            } else {
+                "$label (showing 3 lines):\n${lines.take(3).joinToString("\n")}\n... (${lines.size - 3} more lines)"
+            }
+        }
+        
+        return formatStringPreview(oldString, "Old") + "\n\n" + formatStringPreview(newString, "New")
     }
     
     @Composable
@@ -1844,14 +1937,14 @@ class ClaudeChatPanelFinal(private val project: Project) {
         primaryColor: Color,
         codeBlockBg: Color
     ) {
-        val parts = splitMarkdown(text)
+        val elements = parseMarkdown(text)
         
         Column(
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            parts.forEach { part ->
-                when (part.type) {
-                    MarkdownPartType.CODE_BLOCK -> {
+            elements.forEach { element ->
+                when (element.type) {
+                    MarkdownElementType.CODE_BLOCK -> {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -1861,7 +1954,7 @@ class ClaudeChatPanelFinal(private val project: Project) {
                                 .padding(8.dp)
                         ) {
                             Column {
-                                part.language?.let { lang ->
+                                element.language?.let { lang ->
                                     SimpleText(
                                         text = lang,
                                         color = primaryColor.copy(alpha = 0.6f),
@@ -1871,7 +1964,7 @@ class ClaudeChatPanelFinal(private val project: Project) {
                                     Spacer(modifier = Modifier.height(4.dp))
                                 }
                                 SimpleText(
-                                    text = part.content,
+                                    text = element.content,
                                     color = textColor.copy(alpha = 0.9f),
                                     fontSize = 12.sp,
                                     fontFamily = FontFamily.Monospace
@@ -1879,7 +1972,7 @@ class ClaudeChatPanelFinal(private val project: Project) {
                             }
                         }
                     }
-                    MarkdownPartType.INLINE_CODE -> {
+                    MarkdownElementType.CODE_SPAN -> {
                         Box(
                             modifier = Modifier
                                 .background(
@@ -1889,16 +1982,54 @@ class ClaudeChatPanelFinal(private val project: Project) {
                                 .padding(horizontal = 4.dp, vertical = 2.dp)
                         ) {
                             SimpleText(
-                                text = part.content,
+                                text = element.content,
                                 color = primaryColor,
                                 fontSize = 13.sp,
                                 fontFamily = FontFamily.Monospace
                             )
                         }
                     }
-                    MarkdownPartType.TEXT -> {
+                    MarkdownElementType.HEADING -> {
                         SimpleText(
-                            text = part.content,
+                            text = element.content,
+                            color = textColor,
+                            fontSize = when (element.level) {
+                                1 -> 18.sp
+                                2 -> 16.sp
+                                3 -> 15.sp
+                                4 -> 14.sp
+                                else -> 13.sp
+                            },
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    MarkdownElementType.STRONG -> {
+                        SimpleText(
+                            text = element.content,
+                            color = textColor,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    MarkdownElementType.EMPHASIS -> {
+                        SimpleText(
+                            text = element.content,
+                            color = textColor,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Normal
+                        )
+                    }
+                    MarkdownElementType.PARAGRAPH, MarkdownElementType.TEXT -> {
+                        SimpleText(
+                            text = element.content,
+                            color = textColor,
+                            fontSize = 14.sp
+                        )
+                    }
+                    else -> {
+                        // Handle other types like LIST_ITEM if needed
+                        SimpleText(
+                            text = element.content,
                             color = textColor,
                             fontSize = 14.sp
                         )
@@ -1908,96 +2039,165 @@ class ClaudeChatPanelFinal(private val project: Project) {
         }
     }
     
-    private data class MarkdownPart(
-        val type: MarkdownPartType,
+    // Flexmark parser configuration
+    private val flexmarkOptions = MutableDataSet().apply {
+        set(Parser.EXTENSIONS, listOf(
+            TablesExtension.create(),
+            StrikethroughExtension.create(),
+            AutolinkExtension.create(),
+            TaskListExtension.create()
+        ))
+    }
+    
+    private val parser = Parser.builder(flexmarkOptions).build()
+    
+    data class MarkdownElement(
+        val type: MarkdownElementType,
         val content: String,
+        val level: Int = 0,
         val language: String? = null
     )
     
-    private enum class MarkdownPartType {
-        TEXT, CODE_BLOCK, INLINE_CODE
+    enum class MarkdownElementType {
+        TEXT, HEADING, PARAGRAPH, CODE_BLOCK, CODE_SPAN, STRONG, EMPHASIS, LIST_ITEM
     }
     
-    private fun splitMarkdown(text: String): List<MarkdownPart> {
-        val parts = mutableListOf<MarkdownPart>()
-        val codeBlockRegex = """```(\w*)\n?([\s\S]*?)```""".toRegex()
+    private fun parseMarkdown(text: String): List<MarkdownElement> {
+        val document = parser.parse(text)
+        val elements = mutableListOf<MarkdownElement>()
         
-        var lastEnd = 0
-        
-        // Find code blocks first
-        codeBlockRegex.findAll(text).forEach { match ->
-            // Add text before code block
-            if (match.range.first > lastEnd) {
-                val textBefore = text.substring(lastEnd, match.range.first)
-                // Process inline code in text
-                processInlineCode(textBefore, parts)
-            }
-            
-            // Add code block
-            parts.add(
-                MarkdownPart(
-                    type = MarkdownPartType.CODE_BLOCK,
-                    content = match.groupValues[2].trim(),
-                    language = match.groupValues[1].takeIf { it.isNotEmpty() }
+        val visitor = NodeVisitor(
+            VisitHandler(Heading::class.java) { node ->
+                elements.add(
+                    MarkdownElement(
+                        type = MarkdownElementType.HEADING,
+                        content = node.text.toString(),
+                        level = node.level
+                    )
                 )
-            )
-            
-            lastEnd = match.range.last + 1
-        }
-        
-        // Add remaining text
-        if (lastEnd < text.length) {
-            processInlineCode(text.substring(lastEnd), parts)
-        }
-        
-        // If no parts were added, just add the whole text
-        if (parts.isEmpty()) {
-            parts.add(MarkdownPart(MarkdownPartType.TEXT, text))
-        }
-        
-        return parts
-    }
-    
-    private fun processInlineCode(text: String, parts: MutableList<MarkdownPart>) {
-        val inlineCodeRegex = """`([^`]+)`""".toRegex()
-        var lastEnd = 0
-        
-        inlineCodeRegex.findAll(text).forEach { match ->
-            // Add text before inline code
-            if (match.range.first > lastEnd) {
-                val plainText = text.substring(lastEnd, match.range.first)
-                if (plainText.isNotEmpty()) {
-                    parts.add(
-                        MarkdownPart(
-                            type = MarkdownPartType.TEXT,
-                            content = plainText
+            },
+            VisitHandler(Paragraph::class.java) { node ->
+                processInlineElements(node, elements)
+            },
+            VisitHandler(FencedCodeBlock::class.java) { node ->
+                elements.add(
+                    MarkdownElement(
+                        type = MarkdownElementType.CODE_BLOCK,
+                        content = node.contentChars.toString(),
+                        language = node.info.toString().takeIf { it.isNotEmpty() }
+                    )
+                )
+            },
+            VisitHandler(IndentedCodeBlock::class.java) { node ->
+                elements.add(
+                    MarkdownElement(
+                        type = MarkdownElementType.CODE_BLOCK,
+                        content = node.contentChars.toString()
+                    )
+                )
+            },
+            VisitHandler(Text::class.java) { node ->
+                if (elements.none { it == elements.lastOrNull() && it.type == MarkdownElementType.TEXT }) {
+                    elements.add(
+                        MarkdownElement(
+                            type = MarkdownElementType.TEXT,
+                            content = node.chars.toString()
                         )
                     )
                 }
             }
-            
-            // Add inline code
-            parts.add(
-                MarkdownPart(
-                    type = MarkdownPartType.INLINE_CODE,
-                    content = match.groupValues[1]
-                )
-            )
-            
-            lastEnd = match.range.last + 1
+        )
+        
+        visitor.visitChildren(document)
+        return elements
+    }
+    
+    private fun processInlineElements(parent: Node, elements: MutableList<MarkdownElement>) {
+        val text = StringBuilder()
+        var hasInlineFormatting = false
+        
+        parent.children.forEach { child ->
+            when (child) {
+                is Text -> text.append(child.chars)
+                is Code -> {
+                    if (text.isNotEmpty()) {
+                        elements.add(MarkdownElement(MarkdownElementType.TEXT, text.toString()))
+                        text.clear()
+                    }
+                    elements.add(MarkdownElement(MarkdownElementType.CODE_SPAN, child.text.toString()))
+                    hasInlineFormatting = true
+                }
+                is StrongEmphasis -> {
+                    if (text.isNotEmpty()) {
+                        elements.add(MarkdownElement(MarkdownElementType.TEXT, text.toString()))
+                        text.clear()
+                    }
+                    elements.add(MarkdownElement(MarkdownElementType.STRONG, child.text.toString()))
+                    hasInlineFormatting = true
+                }
+                is Emphasis -> {
+                    if (text.isNotEmpty()) {
+                        elements.add(MarkdownElement(MarkdownElementType.TEXT, text.toString()))
+                        text.clear()
+                    }
+                    elements.add(MarkdownElement(MarkdownElementType.EMPHASIS, child.text.toString()))
+                    hasInlineFormatting = true
+                }
+                else -> text.append(child.chars)
+            }
         }
         
-        // Add remaining text
-        if (lastEnd < text.length) {
-            val remainingText = text.substring(lastEnd)
-            if (remainingText.isNotEmpty()) {
-                parts.add(
-                    MarkdownPart(
-                        type = MarkdownPartType.TEXT,
-                        content = remainingText
-                    )
+        if (text.isNotEmpty()) {
+            elements.add(
+                MarkdownElement(
+                    type = if (hasInlineFormatting) MarkdownElementType.TEXT else MarkdownElementType.PARAGRAPH,
+                    content = text.toString()
                 )
+            )
+        }
+    }
+    
+    
+    /**
+     * Handle keyboard events for completion navigation
+     */
+    private fun handleKeyEvent(
+        keyEvent: KeyEvent,
+        completionState: com.claudecodechat.completion.CompletionState,
+        completionManager: com.claudecodechat.completion.CompletionManager,
+        currentTextValue: TextFieldValue,
+        onTextValueChange: (TextFieldValue) -> Unit
+    ): Boolean {
+        if (keyEvent.type != KeyEventType.KeyDown) return false
+        if (!completionState.isShowing) return false
+        
+        return when (keyEvent.key) {
+            Key.DirectionUp -> {
+                completionManager.selectPrevious()
+                true
             }
+            Key.DirectionDown -> {
+                completionManager.selectNext()
+                true
+            }
+            Key.Tab, Key.Enter -> {
+                val result = completionManager.acceptCompletion(
+                    currentTextValue.text,
+                    currentTextValue.selection.end
+                )
+                if (result != null) {
+                    onTextValueChange(TextFieldValue(
+                        text = result.newText,
+                        selection = TextRange(result.newCursorPosition)
+                    ))
+                }
+                true
+            }
+            Key.Escape -> {
+                completionManager.hideCompletion()
+                true
+            }
+            else -> false
         }
     }
 }

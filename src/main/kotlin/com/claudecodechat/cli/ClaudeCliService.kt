@@ -52,6 +52,7 @@ class ClaudeCliService(private val project: Project) {
         val customArgs: List<String> = emptyList()
     )
     
+    
     /**
      * Execute Claude Code CLI with streaming output
      */
@@ -113,8 +114,14 @@ class ClaudeCliService(private val project: Project) {
                     val reader = BufferedReader(InputStreamReader(inputStream), 1) // Small buffer size
                     var lineCount = 0
                     
-                    // Use a more aggressive reading approach
+                    // Use a more aggressive reading approach with interrupt checks
                     while (true) {
+                        // Check if thread was interrupted
+                        if (Thread.currentThread().isInterrupted) {
+                            logger.info("Stdout reader thread interrupted, stopping")
+                            break
+                        }
+                        
                         val line = reader.readLine()
                         if (line == null) {
                             logger.info("Reached end of stdout stream")
@@ -130,6 +137,12 @@ class ClaudeCliService(private val project: Project) {
                             } catch (e: Exception) {
                                 logger.warn("Failed to parse Claude message: $line", e)
                             }
+                        }
+                        
+                        // Additional interrupt check after processing
+                        if (Thread.currentThread().isInterrupted) {
+                            logger.info("Stdout reader thread interrupted after processing line, stopping")
+                            break
                         }
                     }
                     logger.info("Stdout reader finished, read $lineCount lines")

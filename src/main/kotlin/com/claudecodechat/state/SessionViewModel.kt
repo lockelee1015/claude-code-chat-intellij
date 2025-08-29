@@ -592,6 +592,10 @@ class SessionViewModel(private val project: Project) : Disposable {
         logger.info("Stopping current request")
         currentThread?.interrupt()
         currentThread = null
+        
+        // Also stop any running Claude processes
+        cliService.stopAllProcesses()
+        
         _isLoading.value = false
         logger.info("Request stopped, loading state set to false")
     }

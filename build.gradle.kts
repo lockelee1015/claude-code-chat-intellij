@@ -45,6 +45,9 @@ dependencies {
     // Network and HTTP
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     
+    // Markdown parsing
+    implementation("com.vladsch.flexmark:flexmark-all:0.64.8")
+    
     // Process management - using standard Java ProcessBuilder instead
     
     // File watching
