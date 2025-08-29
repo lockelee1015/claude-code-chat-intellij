@@ -16,7 +16,7 @@ plugins {
 }
 
 group = "com.claudecodechat"
-version = "1.0.1"
+version = "1.0.2"
 
 repositories {
     mavenCentral()
@@ -31,6 +31,7 @@ repositories {
 
 dependencies {
     intellijPlatform {
+        // Use IntelliJ Platform instead of specific IDE to support all JetBrains IDEs
         intellijIdeaCommunity("2024.1")
         instrumentationTools()
         pluginVerifier()
@@ -97,8 +98,8 @@ intellijPlatform {
         """.trimIndent()
         
         ideaVersion {
-            sinceBuild = "241"
-            // No untilBuild restriction - supports all future versions
+            sinceBuild = "223"
+            untilBuild = "999.*"  // Support all future versions
         }
     }
     
@@ -117,10 +118,16 @@ intellijPlatform {
         ides {
             recommended()
             select {
-                types = listOf(IntelliJPlatformType.IntellijIdeaCommunity)
+                types = listOf(
+                    IntelliJPlatformType.IntellijIdeaCommunity,
+                    IntelliJPlatformType.IntellijIdeaUltimate,
+                    IntelliJPlatformType.GoLand,
+                    IntelliJPlatformType.PyCharmCommunity,
+                    IntelliJPlatformType.WebStorm
+                )
                 channels = listOf(ProductRelease.Channel.RELEASE)
-                sinceBuild = "241"
-                // No untilBuild - verify against latest versions
+                sinceBuild = "223"
+                untilBuild = "999.*"  // Support all future versions
             }
         }
     }
@@ -144,8 +151,8 @@ tasks {
     }
     
     patchPluginXml {
-        sinceBuild = "241"
-        // No untilBuild - supports all future versions
+        sinceBuild = "223"
+        untilBuild = "999.*"  // Support all future versions
         
         changeNotes = provider {
             val changelog = project.changelog
