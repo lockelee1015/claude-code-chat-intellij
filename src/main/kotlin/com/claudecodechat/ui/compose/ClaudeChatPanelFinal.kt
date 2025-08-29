@@ -35,6 +35,7 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.awt.ComposePanel
@@ -217,10 +218,53 @@ class ClaudeChatPanelFinal(private val project: Project) {
                 completionManager = completionManager,
                 completionState = completionState,
                 onSendMessage = { prompt, model ->
+                    // Build structured message with IDE context
+                    val finalMessage = buildString {
+                        append(prompt)
+                        
+                        // Append IDE context if available
+                        val contextParts = mutableListOf<String>()
+                        
+                        // Add current file context
+                        val fileEditorManager = FileEditorManager.getInstance(project)
+                        val currentEditor = fileEditorManager.selectedEditor
+                        val currentFile = currentEditor?.file
+                        if (currentFile != null) {
+                            contextParts.add("User is in IDE and has ${currentFile.presentableName} open")
+                        }
+                        
+                        // Add selected lines context
+                        val textEditor = fileEditorManager.selectedTextEditor
+                        if (textEditor != null && textEditor.selectionModel.hasSelection()) {
+                            val startLine = textEditor.document.getLineNumber(textEditor.selectionModel.selectionStart) + 1
+                            val endLine = textEditor.document.getLineNumber(textEditor.selectionModel.selectionEnd) + 1
+                            if (startLine == endLine) {
+                                contextParts.add("User has selected line $startLine")
+                            } else {
+                                contextParts.add("User has selected lines $startLine-$endLine")
+                            }
+                            
+                            // Include selected text
+                            val selectedText = textEditor.selectionModel.selectedText
+                            if (!selectedText.isNullOrBlank()) {
+                                append("\n\nSelected code:\n```\n")
+                                append(selectedText)
+                                append("\n```")
+                            }
+                        }
+                        
+                        // Add context as structured metadata
+                        if (contextParts.isNotEmpty()) {
+                            append("\n\n[IDE Context: ")
+                            append(contextParts.joinToString(", "))
+                            append("]")
+                        }
+                    }
+                    
                     com.intellij.openapi.diagnostic.Logger.getInstance(ClaudeChatPanelFinal::class.java)
-                        .info("Sending message from UI: $prompt")
-                    lastSentMessage.value = prompt
-                    viewModel.sendPrompt(prompt, model)
+                        .info("Sending message from UI: $finalMessage")
+                    lastSentMessage.value = finalMessage
+                    viewModel.sendPrompt(finalMessage, model)
                     inputTextValue = TextFieldValue("")
                     completionManager.hideCompletion()
                 },
@@ -707,13 +751,61 @@ class ClaudeChatPanelFinal(private val project: Project) {
                             message.message?.content?.forEach { content ->
                                 when (content.type) {
                                     ContentType.TEXT -> {
-                                        content.text?.let {
-                                            MarkdownText(
-                                                text = it,
-                                                textColor = textColor,
-                                                primaryColor = primaryColor,
-                                                codeBlockBg = codeBlockBg
-                                            )
+                                        content.text?.let { text ->
+                                            // Check if the message contains IDE context (for user messages)
+                                            val contextPattern = "\\[IDE Context: ([^\\]]+)\\]".toRegex()
+                                            val contextMatch = contextPattern.find(text)
+                                            
+                                            if (contextMatch != null && message.type == MessageType.USER) {
+                                                // Split text into main content and context
+                                                val mainText = text.substring(0, contextMatch.range.first).trim()
+                                                val contextText = contextMatch.groupValues[1]
+                                                
+                                                Column {
+                                                    // Display main message
+                                                    if (mainText.isNotEmpty()) {
+                                                        MarkdownText(
+                                                            text = mainText,
+                                                            textColor = textColor,
+                                                            primaryColor = primaryColor,
+                                                            codeBlockBg = codeBlockBg
+                                                        )
+                                                        Spacer(modifier = Modifier.height(8.dp))
+                                                    }
+                                                    
+                                                    // Display IDE context with secondary color
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .clip(RoundedCornerShape(4.dp))
+                                                            .background(textColor.copy(alpha = 0.05f))
+                                                            .padding(8.dp)
+                                                    ) {
+                                                        Row(
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                        ) {
+                                                            SimpleText(
+                                                                text = "ℹ",
+                                                                color = textColor.copy(alpha = 0.5f),
+                                                                fontSize = 12.sp
+                                                            )
+                                                            SimpleText(
+                                                                text = contextText,
+                                                                color = textColor.copy(alpha = 0.6f),
+                                                                fontSize = 12.sp
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            } else {
+                                                MarkdownText(
+                                                    text = text,
+                                                    textColor = textColor,
+                                                    primaryColor = primaryColor,
+                                                    codeBlockBg = codeBlockBg
+                                                )
+                                            }
                                         }
                                     }
                                     ContentType.TOOL_USE -> {
@@ -763,13 +855,61 @@ class ClaudeChatPanelFinal(private val project: Project) {
                             message.message?.content?.forEach { content ->
                                 when (content.type) {
                                     ContentType.TEXT -> {
-                                        content.text?.let {
-                                            MarkdownText(
-                                                text = it,
-                                                textColor = textColor,
-                                                primaryColor = primaryColor,
-                                                codeBlockBg = codeBlockBg
-                                            )
+                                        content.text?.let { text ->
+                                            // Check if the message contains IDE context (for user messages)
+                                            val contextPattern = "\\[IDE Context: ([^\\]]+)\\]".toRegex()
+                                            val contextMatch = contextPattern.find(text)
+                                            
+                                            if (contextMatch != null && message.type == MessageType.USER) {
+                                                // Split text into main content and context
+                                                val mainText = text.substring(0, contextMatch.range.first).trim()
+                                                val contextText = contextMatch.groupValues[1]
+                                                
+                                                Column {
+                                                    // Display main message
+                                                    if (mainText.isNotEmpty()) {
+                                                        MarkdownText(
+                                                            text = mainText,
+                                                            textColor = textColor,
+                                                            primaryColor = primaryColor,
+                                                            codeBlockBg = codeBlockBg
+                                                        )
+                                                        Spacer(modifier = Modifier.height(8.dp))
+                                                    }
+                                                    
+                                                    // Display IDE context with secondary color
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .clip(RoundedCornerShape(4.dp))
+                                                            .background(textColor.copy(alpha = 0.05f))
+                                                            .padding(8.dp)
+                                                    ) {
+                                                        Row(
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                        ) {
+                                                            SimpleText(
+                                                                text = "ℹ",
+                                                                color = textColor.copy(alpha = 0.5f),
+                                                                fontSize = 12.sp
+                                                            )
+                                                            SimpleText(
+                                                                text = contextText,
+                                                                color = textColor.copy(alpha = 0.6f),
+                                                                fontSize = 12.sp
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            } else {
+                                                MarkdownText(
+                                                    text = text,
+                                                    textColor = textColor,
+                                                    primaryColor = primaryColor,
+                                                    codeBlockBg = codeBlockBg
+                                                )
+                                            }
                                         }
                                     }
                                     ContentType.TOOL_USE -> {
@@ -1458,6 +1598,7 @@ class ClaudeChatPanelFinal(private val project: Project) {
         
         // Get current editor file context
         var currentFile by remember { mutableStateOf<String?>(null) }
+        var selectedLines by remember { mutableStateOf<String?>(null) }
         
         // Set up editor listener
         DisposableEffect(Unit) {
@@ -1466,14 +1607,31 @@ class ClaudeChatPanelFinal(private val project: Project) {
             // Initial file
             currentFile = fileEditorManager.selectedEditor?.file?.presentableName
             
+            // Check for selected lines
+            val updateSelection = {
+                val textEditor = fileEditorManager.selectedTextEditor
+                selectedLines = if (textEditor != null && textEditor.selectionModel.hasSelection()) {
+                    val startLine = textEditor.document.getLineNumber(textEditor.selectionModel.selectionStart) + 1
+                    val endLine = textEditor.document.getLineNumber(textEditor.selectionModel.selectionEnd) + 1
+                    if (startLine == endLine) {
+                        "Line $startLine selected"
+                    } else {
+                        "Lines $startLine-$endLine selected"
+                    }
+                } else null
+            }
+            updateSelection()
+            
             // Listen for file editor changes
             val listener = object : com.intellij.openapi.fileEditor.FileEditorManagerListener {
                 override fun fileOpened(source: FileEditorManager, file: com.intellij.openapi.vfs.VirtualFile) {
                     currentFile = file.presentableName
+                    updateSelection()
                 }
                 
                 override fun selectionChanged(event: com.intellij.openapi.fileEditor.FileEditorManagerEvent) {
                     currentFile = event.newFile?.presentableName
+                    updateSelection()
                 }
             }
             
@@ -1483,7 +1641,14 @@ class ClaudeChatPanelFinal(private val project: Project) {
                 listener
             )
             
+            // Poll for selection changes
+            val timer = javax.swing.Timer(500) {
+                updateSelection()
+            }
+            timer.start()
+            
             onDispose {
+                timer.stop()
                 connection.dispose()
             }
         }
@@ -1604,11 +1769,46 @@ class ClaudeChatPanelFinal(private val project: Project) {
                             }
                         }
                     }
+                    
+                    // Selected lines indicator
+                    if (selectedLines != null) {
+                        Box(
+                            modifier = Modifier
+                                .height(32.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(primaryColor.copy(alpha = 0.05f))
+                                .border(
+                                    width = 1.dp,
+                                    color = primaryColor.copy(alpha = 0.2f),
+                                    shape = RoundedCornerShape(8.dp)
+                                )
+                                .padding(horizontal = 12.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                SimpleText(
+                                    text = "▣",
+                                    color = primaryColor,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                SimpleText(
+                                    text = selectedLines ?: "",
+                                    color = primaryColor.copy(alpha = 0.8f),
+                                    fontSize = 12.sp,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
                 }
                 
                 // Right side: Model selector and Send button
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     // Model selector moved to right side
@@ -1718,79 +1918,79 @@ class ClaudeChatPanelFinal(private val project: Project) {
                             }
                         }
                     }
-                }
-                
-                // Send/Stop button with IntelliJ UI style
-                if (isLoading) {
-                    // Stop button with red theme
-                    Box(
-                        modifier = Modifier
-                            .height(32.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color(0xFFDB5860).copy(alpha = 0.1f))
-                            .border(1.dp, Color(0xFFDB5860).copy(alpha = 0.2f), RoundedCornerShape(6.dp))
-                            .clickable { onStop() }
-                            .padding(horizontal = 16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    
+                    // Send/Stop button with IntelliJ UI style
+                    if (isLoading) {
+                        // Stop button with red theme
+                        Box(
+                            modifier = Modifier
+                                .height(32.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color(0xFFDB5860).copy(alpha = 0.1f))
+                                .border(1.dp, Color(0xFFDB5860).copy(alpha = 0.2f), RoundedCornerShape(6.dp))
+                                .clickable { onStop() }
+                                .padding(horizontal = 16.dp),
+                            contentAlignment = Alignment.Center
                         ) {
-                            SimpleText(
-                                text = "■",  // Stop icon
-                                color = Color(0xFFDB5860),
-                                fontSize = 10.sp
-                            )
-                            SimpleText(
-                                text = "Stop",
-                                color = Color(0xFFDB5860),
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    }
-                } else {
-                    // Send button
-                    Box(
-                        modifier = Modifier
-                            .height(32.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(
-                                if (inputTextValue.text.isNotBlank()) primaryColor
-                                else if (isDarkTheme) Color(0xFF45494A) else Color(0xFFDFE1E5)
-                            )
-                            .then(
-                                if (!isDarkTheme && inputTextValue.text.isNotBlank()) 
-                                    Modifier.border(1.dp, primaryColor.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
-                                else Modifier
-                            )
-                            .clickable(enabled = inputTextValue.text.isNotBlank()) {
-                                if (inputTextValue.text.isNotBlank()) {
-                                    val modelToUse = if (selectedModel == "auto") "" else selectedModel
-                                    onSendMessage(inputTextValue.text, modelToUse)
-                                }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                SimpleText(
+                                    text = "■",  // Stop icon
+                                    color = Color(0xFFDB5860),
+                                    fontSize = 10.sp
+                                )
+                                SimpleText(
+                                    text = "Stop",
+                                    color = Color(0xFFDB5860),
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
                             }
-                            .padding(horizontal = 16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        }
+                    } else {
+                        // Send button
+                        Box(
+                            modifier = Modifier
+                                .height(32.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(
+                                    if (inputTextValue.text.isNotBlank()) primaryColor
+                                    else if (isDarkTheme) Color(0xFF45494A) else Color(0xFFDFE1E5)
+                                )
+                                .then(
+                                    if (!isDarkTheme && inputTextValue.text.isNotBlank()) 
+                                        Modifier.border(1.dp, primaryColor.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
+                                    else Modifier
+                                )
+                                .clickable(enabled = inputTextValue.text.isNotBlank()) {
+                                    if (inputTextValue.text.isNotBlank()) {
+                                        val modelToUse = if (selectedModel == "auto") "" else selectedModel
+                                        onSendMessage(inputTextValue.text, modelToUse)
+                                    }
+                                }
+                                .padding(horizontal = 16.dp),
+                            contentAlignment = Alignment.Center
                         ) {
-                            SimpleText(
-                                text = "Send",
-                                color = if (inputTextValue.text.isNotBlank()) Color.White
-                                else if (isDarkTheme) Color(0xFF868A91) else Color(0xFF6F737A),
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                            SimpleText(
-                                text = "→",
-                                color = if (inputTextValue.text.isNotBlank()) Color.White.copy(alpha = 0.9f)
-                                else if (isDarkTheme) Color(0xFF868A91) else Color(0xFF6F737A),
-                                fontSize = 14.sp
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                SimpleText(
+                                    text = "Send",
+                                    color = if (inputTextValue.text.isNotBlank()) Color.White
+                                    else if (isDarkTheme) Color(0xFF868A91) else Color(0xFF6F737A),
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                SimpleText(
+                                    text = "→",
+                                    color = if (inputTextValue.text.isNotBlank()) Color.White.copy(alpha = 0.9f)
+                                    else if (isDarkTheme) Color(0xFF868A91) else Color(0xFF6F737A),
+                                    fontSize = 14.sp
+                                )
+                            }
                         }
                     }
                 }
