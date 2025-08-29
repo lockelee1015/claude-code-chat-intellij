@@ -98,7 +98,7 @@ intellijPlatform {
         
         ideaVersion {
             sinceBuild = "241"
-            untilBuild = "242.*"
+            // No untilBuild restriction - supports all future versions
         }
     }
     
@@ -120,7 +120,7 @@ intellijPlatform {
                 types = listOf(IntelliJPlatformType.IntellijIdeaCommunity)
                 channels = listOf(ProductRelease.Channel.RELEASE)
                 sinceBuild = "241"
-                untilBuild = "242.*"
+                // No untilBuild - verify against latest versions
             }
         }
     }
@@ -145,7 +145,7 @@ tasks {
     
     patchPluginXml {
         sinceBuild = "241"
-        untilBuild = "242.*"
+        // No untilBuild - supports all future versions
         
         changeNotes = provider {
             val changelog = project.changelog
