@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [1.0.5] - 2025-08-31
+### Fixed
+- Fixed Skiko library loading issue on macOS ARM64 (M1/M2)
+- Added all platform-specific Skiko native libraries to plugin package
+- Ensured proper packaging of .dylib, .dll, .so files and their checksums
+
 ## [1.0.4] - 2025-08-29
 ### Added
 - Image paste support - users can now paste screenshots directly into the input field

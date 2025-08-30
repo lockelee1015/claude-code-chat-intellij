@@ -16,7 +16,7 @@ plugins {
 }
 
 group = "com.claudecodechat"
-version = "1.0.4"
+version = "1.0.5"
 
 repositories {
     mavenCentral()
@@ -39,8 +39,20 @@ dependencies {
         testFramework(TestFrameworkType.Platform)
     }
     
-    // Compose Desktop dependencies
+    // Compose Desktop dependencies with all platforms
     implementation(compose.desktop.currentOs)
+    implementation(compose.runtime)
+    implementation(compose.foundation)
+    implementation(compose.material)
+    implementation(compose.ui)
+    implementation(compose.components.resources)
+    
+    // Explicitly add Skiko for all platforms
+    implementation("org.jetbrains.skiko:skiko-awt-runtime-macos-arm64:0.8.9")
+    implementation("org.jetbrains.skiko:skiko-awt-runtime-macos-x64:0.8.9")
+    implementation("org.jetbrains.skiko:skiko-awt-runtime-windows-x64:0.8.9")
+    implementation("org.jetbrains.skiko:skiko-awt-runtime-linux-x64:0.8.9")
+    implementation("org.jetbrains.skiko:skiko-awt-runtime-linux-arm64:0.8.9")
     
     // Kotlin Serialization for JSON parsing
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
@@ -163,6 +175,28 @@ tasks {
     
     buildSearchableOptions {
         enabled = false
+    }
+    
+    // Ensure Skiko native libraries are included in the plugin
+    prepareSandbox {
+        doLast {
+            // Copy Skiko native libraries to the plugin lib folder
+            val skikoLibs = configurations.runtimeClasspath.get().filter { 
+                it.name.contains("skiko-awt-runtime")
+            }
+            skikoLibs.forEach { lib ->
+                copy {
+                    from(zipTree(lib))
+                    into("${destinationDir}/claude-code-chat/lib")
+                    include("*.dylib", "*.dll", "*.so", "*.sha256")
+                }
+            }
+        }
+    }
+    
+    buildPlugin {
+        // Ensure the plugin includes all necessary runtime dependencies
+        archiveClassifier.set("")
     }
 }
 
