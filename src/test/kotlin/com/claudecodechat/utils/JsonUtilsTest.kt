@@ -1,7 +1,11 @@
 package com.claudecodechat.utils
 
-import com.claudecodechat.models.*
-import org.junit.jupiter.api.Assertions.*
+import com.claudecodechat.models.ClaudeStreamMessage
+import com.claudecodechat.models.Content
+import com.claudecodechat.models.ContentType
+import com.claudecodechat.models.MessageType
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 

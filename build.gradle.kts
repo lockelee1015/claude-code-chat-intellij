@@ -13,6 +13,7 @@ plugins {
     id("org.jetbrains.compose") version "1.6.11"
     id("org.jetbrains.kotlin.plugin.compose") version "2.0.0"
     kotlin("plugin.serialization") version "1.9.23"
+    id("io.gitlab.arturbosch.detekt") version "1.23.4"
 }
 
 group = "com.claudecodechat"
@@ -175,7 +176,39 @@ tasks.register<JavaExec>("runSessionTest") {
     dependsOn("compileTestKotlin")
 }
 
+// Add a code standards verification task
+tasks.register("codeStandards") {
+    group = "verification"
+    description = "Run detekt for code standards verification"
+    dependsOn("detekt")
+}
+
 // Ensure Compose dependencies are available
 configurations.all {
     exclude(group = "org.jetbrains.compose.material", module = "material")
+}
+
+// Detekt configuration
+detekt {
+    buildUponDefaultConfig = true
+    allRules = false
+    config.setFrom("$projectDir/detekt.yml")
+    autoCorrect = true
+    parallel = true
+}
+
+// Add detekt tasks
+tasks.withType<io.gitlab.arturbosch.detekt.Detekt>().configureEach {
+    reports {
+        html.required.set(true)
+        xml.required.set(false)
+        txt.required.set(false)
+        sarif.required.set(false)
+        md.required.set(false)
+    }
+}
+
+// Make build depend on detekt
+tasks.named("build") {
+    dependsOn("detekt")
 }
