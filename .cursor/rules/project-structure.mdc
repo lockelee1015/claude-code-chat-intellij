@@ -1,0 +1,38 @@
+---
+alwaysApply: true
+description: 项目结构与关键入口说明，帮助 AI 快速定位代码。
+---
+
+## 项目结构与关键入口
+
+- [build.gradle.kts](mdc:build.gradle.kts)
+- [settings.gradle.kts](mdc:settings.gradle.kts)
+- [gradle.properties](mdc:gradle.properties)
+- [src/main/resources/META-INF/plugin.xml](mdc:src/main/resources/META-INF/plugin.xml)
+- [src/main/kotlin/com/claudecodechat](mdc:src/main/kotlin/com/claudecodechat)
+- [src/main/kotlin/com/claudecodechat/toolWindow/ClaudeChatSimpleToolWindowFactory.kt](mdc:src/main/kotlin/com/claudecodechat/toolWindow/ClaudeChatSimpleToolWindowFactory.kt)
+- [src/main/kotlin/com/claudecodechat/actions/OpenChatAction.kt](mdc:src/main/kotlin/com/claudecodechat/actions/OpenChatAction.kt)
+- [src/main/kotlin/com/claudecodechat/actions/SendToClaudeAction.kt](mdc:src/main/kotlin/com/claudecodechat/actions/SendToClaudeAction.kt)
+- [src/main/kotlin/com/claudecodechat/actions/ClearChatAction.kt](mdc:src/main/kotlin/com/claudecodechat/actions/ClearChatAction.kt)
+- [src/test/kotlin/com/claudecodechat](mdc:src/test/kotlin/com/claudecodechat)
+- [detekt.yml](mdc:detekt.yml)
+- [README_CN.md](mdc:README_CN.md)
+- [README.md](mdc:README.md)
+
+### 目录速览
+
+    ```text
+    src/
+      main/
+        kotlin/com/claudecodechat/...    # Kotlin 源码
+        resources/META-INF/plugin.xml     # 插件声明与扩展点
+      test/kotlin/com/claudecodechat/... # 测试
+    build/idea-sandbox/...                # 运行插件的沙箱
+    ```
+
+### 导航提示
+
+- 插件扩展点、动作与工具窗均在 `plugin.xml` 中声明，并与对应 `*.kt` 类绑定。
+- `ClaudeChatSimpleToolWindowFactory.kt` 是工具窗入口，动作类位于 `actions/` 目录。
+- 若需要排查 UI 行为，先看 `plugin.xml` 的扩展点，再跳转到对应 Kotlin 类。
+

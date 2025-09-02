@@ -1,0 +1,21 @@
+---
+globs: src/main/resources/META-INF/plugin.xml,src/main/kotlin/**/*.kt
+description: IntelliJ 插件扩展点、动作、工具窗与资源组织约定。
+---
+
+## IntelliJ 插件约定
+
+- 所有扩展点定义于 [plugin.xml](mdc:src/main/resources/META-INF/plugin.xml)。
+- 动作类位于 `src/main/kotlin/com/claudecodechat/actions/`，例如：
+  - [OpenChatAction.kt](mdc:src/main/kotlin/com/claudecodechat/actions/OpenChatAction.kt)
+  - [SendToClaudeAction.kt](mdc:src/main/kotlin/com/claudecodechat/actions/SendToClaudeAction.kt)
+  - [ClearChatAction.kt](mdc:src/main/kotlin/com/claudecodechat/actions/ClearChatAction.kt)
+- 工具窗入口：
+  - [ClaudeChatSimpleToolWindowFactory.kt](mdc:src/main/kotlin/com/claudecodechat/toolWindow/ClaudeChatSimpleToolWindowFactory.kt)
+
+### 开发指引
+
+- 新增扩展点：先在 `plugin.xml` 注册，再实现对应 Kotlin 类。
+- UI/动作排查：从 `plugin.xml` 跳到类，实现与资源路径保持一致。
+- 向后兼容：优先使用平台稳定 API；必要时按 IDE 版本做条件处理。
+

@@ -1,0 +1,17 @@
+---
+globs: build.gradle.kts,gradle.properties,src/**
+description: 构建、测试与运行指引，统一本地与 CI 行为。
+---
+
+## 构建与测试
+
+- 构建：使用 `./gradlew build`，确保 `detekt` 通过。
+- 运行沙箱：`./gradlew runIde`，产物位于 `build/idea-sandbox/`。
+- 打包：`./gradlew buildPlugin`，产物位于 `build/distributions/`。
+- 测试：`./gradlew test`，报告在 `build/reports/tests/test/index.html`。
+
+### 质量与检查
+
+- 静态检查：遵循 `detekt.yml`；必要时在最小范围内抑制规则并解释原因。
+- 版本兼容：如涉及平台 API，优先检查 `gradle.properties` 与 `plugin.xml` 的平台版本。
+
