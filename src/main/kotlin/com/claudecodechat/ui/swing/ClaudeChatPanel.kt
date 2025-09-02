@@ -26,6 +26,9 @@ import java.awt.*
 import java.awt.event.*
 import javax.swing.*
 import javax.swing.text.*
+import javax.swing.UIManager
+import com.claudecodechat.ui.markdown.MarkdownRenderer
+import com.claudecodechat.ui.markdown.MarkdownRenderConfig
 
 class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>() {
     private val sessionViewModel = SessionViewModel.getInstance(project)
@@ -87,7 +90,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         return JBScrollPane(messagesPanel).apply {
             preferredSize = Dimension(600, 400)
             verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
-            horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
+            horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
             border = JBUI.Borders.compound(
                 JBUI.Borders.customLine(JBColor.border(), 1),
                 JBUI.Borders.empty()
@@ -517,8 +520,8 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                 
                 for (group in groupedMessages) {
                     val messageComponent = when (group.type) {
-                        "user" -> createMessageComponent(">", JBColor.gray, group.content, JBColor.gray)
-                        "assistant" -> createMessageComponent("●", Color.decode("#FFFFFF"), group.content, JBColor.foreground())
+                        "user" -> createMessageComponent(">", secondaryTextColor(), group.content, secondaryTextColor())
+                        "assistant" -> createMessageComponent("●", JBColor.foreground(), group.content, JBColor.foreground())
                         "tool_interaction" -> createToolInteractionComponent(group.toolUse, group.toolResult)
                         "error" -> createMessageComponent("●", Color.decode("#FF6B6B"), group.content, Color.decode("#FF6B6B"))
                         else -> null
@@ -599,7 +602,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                                 groups.add(MessageGroup(type = "user", content = commandDisplay))
                             }
                         } else if (userText.isNotEmpty()) {
-                            groups.add(MessageGroup(type = "user", content = userText))
+                            groups.add(MessageGroup(type = "user", content = userText.trimStart()))
                         }
                     }
                 }
@@ -608,7 +611,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                         when (content.type) {
                             com.claudecodechat.models.ContentType.TEXT -> {
                                 if (content.text != null && content.text.isNotEmpty()) {
-                                    groups.add(MessageGroup(type = "assistant", content = content.text))
+                                    groups.add(MessageGroup(type = "assistant", content = content.text.trimStart()))
                                 }
                             }
                             com.claudecodechat.models.ContentType.TOOL_USE -> {
@@ -669,6 +672,20 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
             add(contentArea, BorderLayout.CENTER)
         }
     }
+
+    private fun secondaryTextColor(): Color {
+        // IntelliJ UIManager 常见键：Label.disabledForeground、Label.infoForeground、Component.infoForeground
+        val candidateKeys = listOf(
+            "Label.disabledForeground",
+            "Label.infoForeground",
+            "Component.infoForeground"
+        )
+        for (key in candidateKeys) {
+            val c = UIManager.getColor(key)
+            if (c != null) return c
+        }
+        return JBColor.GRAY
+    }
     
     /**
      * Create a tool interaction component
@@ -713,20 +730,15 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         return JBPanel<JBPanel<*>>(BorderLayout()).apply {
             background = JBColor.background()
             border = JBUI.Borders.empty()
-            
-            // Use JTextArea for automatic text wrapping
-            val textArea = JTextArea(content).apply {
-                foreground = textColor
-                background = JBColor.background()
-                font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
-                isEditable = false
-                isOpaque = false
-                lineWrap = true
-                wrapStyleWord = true
-                border = null
-            }
-            
-            add(textArea, BorderLayout.CENTER)
+            val component = MarkdownRenderer.createComponent(
+                content,
+                MarkdownRenderConfig(
+                    allowHeadings = false,
+                    allowImages = false,
+                    overrideForeground = textColor,
+                )
+            )
+            add(component, BorderLayout.CENTER)
         }
     }
     
