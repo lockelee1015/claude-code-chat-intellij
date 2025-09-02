@@ -9,8 +9,8 @@ plugins {
     id("org.jetbrains.kotlin.jvm") version "1.9.23"
     id("org.jetbrains.intellij.platform") version "2.2.0"
     id("org.jetbrains.changelog") version "2.2.0"
-    // Using IntelliJ Platform bundled Jewel modules for 2025.1+
-    // External Compose plugin no longer needed
+    // Temporary: Use external Compose while testing Jewel bridge integration
+    id("org.jetbrains.compose") version "1.6.11"
     id("org.jetbrains.kotlin.plugin.compose") version "2.0.0"
     kotlin("plugin.serialization") version "1.9.23"
     id("io.gitlab.arturbosch.detekt") version "1.23.4"
@@ -22,7 +22,9 @@ version = "1.0.3"
 repositories {
     mavenCentral()
     google()
-    // Using IntelliJ Platform bundled Jewel modules - external Compose repos not needed
+    // Temporary: Keep external Compose repos while testing Jewel bridge
+    maven("https://maven.pkg.jetbrains.space/public/p/compose/dev")
+    maven("https://packages.jetbrains.team/maven/p/kmp/public/")
     
     intellijPlatform {
         defaultRepositories()
@@ -39,16 +41,15 @@ dependencies {
         zipSigner()
         testFramework(TestFrameworkType.Platform)
         
-        // IntelliJ Platform bundled Jewel and Compose modules
+        // IntelliJ Platform bundled Jewel modules for bridge theme
         // Note: These modules are available in IntelliJ Platform 2025.1+ (251.2+)
         bundledModule("intellij.platform.jewel.foundation")
         bundledModule("intellij.platform.jewel.ui")
         bundledModule("intellij.platform.jewel.ideLafBridge")
-        bundledModule("intellij.platform.jewel.markdown.core")
-        bundledModule("intellij.platform.jewel.markdown.ideLafBridgeStyling")
-        bundledModule("intellij.libraries.compose.foundation.desktop")
-        bundledModule("intellij.libraries.skiko")
     }
+    
+    // Temporary: External Compose dependencies while testing bridge integration
+    implementation(compose.desktop.currentOs)
     
     // Kotlin Serialization for JSON parsing
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
@@ -75,7 +76,12 @@ kotlin {
     jvmToolchain(17)
 }
 
-// Remove Compose Desktop configuration - not needed for IntelliJ Platform plugin
+// Temporary: Compose Desktop configuration while testing bridge integration
+compose.desktop {
+    application {
+        mainClass = "MainKt"
+    }
+}
 
 intellijPlatform {
     pluginConfiguration {

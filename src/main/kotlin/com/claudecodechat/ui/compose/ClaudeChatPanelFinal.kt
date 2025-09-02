@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.*
+import org.jetbrains.jewel.bridge.theme.SwingBridgeTheme
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -95,15 +96,16 @@ class ClaudeChatPanelFinal(private val project: Project) {
     
     @Composable
     private fun ClaudeChatContent() {
-        val messages by viewModel.messages.collectAsState()
-        val isLoading by viewModel.isLoading.collectAsState()
-        val currentSession by viewModel.currentSession.collectAsState()
-        val metrics by viewModel.sessionMetrics.collectAsState()
-        
-        // Completion state
-        val completionManager = remember { com.claudecodechat.completion.CompletionManager(project) }
-        val completionState by completionManager.completionState.collectAsState()
-        var inputTextValue by remember { mutableStateOf(TextFieldValue("")) }
+        SwingBridgeTheme {
+            val messages by viewModel.messages.collectAsState()
+            val isLoading by viewModel.isLoading.collectAsState()
+            val currentSession by viewModel.currentSession.collectAsState()
+            val metrics by viewModel.sessionMetrics.collectAsState()
+            
+            // Completion state
+            val completionManager = remember { com.claudecodechat.completion.CompletionManager(project) }
+            val completionState by completionManager.completionState.collectAsState()
+            var inputTextValue by remember { mutableStateOf(TextFieldValue("")) }
         
         // Log loading state changes
         LaunchedEffect(isLoading) {
@@ -278,6 +280,7 @@ class ClaudeChatPanelFinal(private val project: Project) {
             )
             } // End of Column
         } // End of Box
+        } // End of SwingBridgeTheme
     }
     
     @Composable
