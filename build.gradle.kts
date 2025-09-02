@@ -28,28 +28,33 @@ repositories {
     
     intellijPlatform {
         defaultRepositories()
+        // Add snapshot repository for latest builds
+        snapshots()
     }
 }
 
 dependencies {
     intellijPlatform {
-        // Use IntelliJ Platform instead of specific IDE to support all JetBrains IDEs
-        // Upgrade to 2025.1 for Jewel bundled modules support (251.2+)
+        // Use IntelliJ Platform instead of specific IDE to support all JetBrains IDEs  
+        // Use stable 2025.1 release
         intellijIdeaCommunity("2025.1")
         // instrumentationTools() is deprecated and no longer necessary
         pluginVerifier()
         zipSigner()
         testFramework(TestFrameworkType.Platform)
         
-        // IntelliJ Platform bundled Jewel modules for bridge theme
-        // Note: These modules are available in IntelliJ Platform 2025.1+ (251.2+)
-        bundledModule("intellij.platform.jewel.foundation")
-        bundledModule("intellij.platform.jewel.ui")
-        bundledModule("intellij.platform.jewel.ideLafBridge")
+        // TODO: Try bundled modules when they become available in stable release
+        // bundledModule("intellij.platform.jewel")
     }
     
-    // Temporary: External Compose dependencies while testing bridge integration
+    // External Compose dependencies
     implementation(compose.desktop.currentOs)
+    
+    // Add Jewel as external dependency for SwingBridgeTheme
+    // This is temporary until bundled modules work properly
+    implementation("org.jetbrains.jewel:jewel-bridge-theme:0.28.2")
+    implementation("org.jetbrains.jewel:jewel-foundation:0.28.2")
+    implementation("org.jetbrains.jewel:jewel-ui:0.28.2")
     
     // Kotlin Serialization for JSON parsing
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
