@@ -49,8 +49,13 @@ dependencies {
         // Current available modules need to be discovered
     }
     
-    // External Compose dependencies
+    // External Compose dependencies with explicit Skiko runtime dependencies
     implementation(compose.desktop.currentOs)
+    // Ensure native libraries are properly bundled in the plugin
+    runtimeOnly("org.jetbrains.skiko:skiko-awt-runtime-macos-arm64:0.8.4")
+    runtimeOnly("org.jetbrains.skiko:skiko-awt-runtime-macos-x64:0.8.4")
+    runtimeOnly("org.jetbrains.skiko:skiko-awt-runtime-linux-x64:0.8.4")
+    runtimeOnly("org.jetbrains.skiko:skiko-awt-runtime-windows-x64:0.8.4")
     
     // Kotlin Serialization for JSON parsing
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
