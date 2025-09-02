@@ -2,6 +2,9 @@ package com.claudecodechat.session
 
 import com.claudecodechat.models.ClaudeStreamMessage
 import com.claudecodechat.models.Content
+import com.claudecodechat.models.ContentType
+import com.claudecodechat.models.Message
+import com.claudecodechat.models.MessageType
 import com.claudecodechat.models.SessionMetrics
 import com.intellij.openapi.diagnostic.Logger
 import kotlinx.serialization.json.Json
@@ -9,7 +12,9 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 import java.net.URLDecoder
 
@@ -341,7 +346,7 @@ class SessionHistoryLoader {
                 type = ContentType.TOOL_RESULT,
                 toolUseId = element["tool_use_id"]?.jsonPrimitive?.content,
                 content = element["content"]?.jsonPrimitive?.content,
-                isError = element["is_error"]?.jsonPrimitive?.boolean
+                isError = element["is_error"]?.jsonPrimitive?.content == "true"
             )
             else -> null
         }
