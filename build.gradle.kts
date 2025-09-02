@@ -3,14 +3,14 @@ import org.jetbrains.changelog.markdownToHTML
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
 import org.jetbrains.intellij.platform.gradle.IntelliJPlatformType
 import org.jetbrains.intellij.platform.gradle.models.ProductRelease
-import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
 plugins {
     id("java")
     id("org.jetbrains.kotlin.jvm") version "1.9.23"
     id("org.jetbrains.intellij.platform") version "2.2.0"
     id("org.jetbrains.changelog") version "2.2.0"
-    id("org.jetbrains.compose") version "1.6.11"
+    // Using IntelliJ Platform bundled Jewel modules for 2025.1+
+    // External Compose plugin no longer needed
     id("org.jetbrains.kotlin.plugin.compose") version "2.0.0"
     kotlin("plugin.serialization") version "1.9.23"
     id("io.gitlab.arturbosch.detekt") version "1.23.4"
@@ -22,8 +22,7 @@ version = "1.0.3"
 repositories {
     mavenCentral()
     google()
-    maven("https://maven.pkg.jetbrains.space/public/p/compose/dev")
-    maven("https://packages.jetbrains.team/maven/p/kpm/public/")
+    // Using IntelliJ Platform bundled Jewel modules - external Compose repos not needed
     
     intellijPlatform {
         defaultRepositories()
@@ -33,15 +32,23 @@ repositories {
 dependencies {
     intellijPlatform {
         // Use IntelliJ Platform instead of specific IDE to support all JetBrains IDEs
-        intellijIdeaCommunity("2024.1")
-        instrumentationTools()
+        // Upgrade to 2025.1 for Jewel bundled modules support (251.2+)
+        intellijIdeaCommunity("2025.1")
+        // instrumentationTools() is deprecated and no longer necessary
         pluginVerifier()
         zipSigner()
         testFramework(TestFrameworkType.Platform)
+        
+        // IntelliJ Platform bundled Jewel and Compose modules
+        // Note: These modules are available in IntelliJ Platform 2025.1+ (251.2+)
+        bundledModule("intellij.platform.jewel.foundation")
+        bundledModule("intellij.platform.jewel.ui")
+        bundledModule("intellij.platform.jewel.ideLafBridge")
+        bundledModule("intellij.platform.jewel.markdown.core")
+        bundledModule("intellij.platform.jewel.markdown.ideLafBridgeStyling")
+        bundledModule("intellij.libraries.compose.foundation.desktop")
+        bundledModule("intellij.libraries.skiko")
     }
-    
-    // Compose Desktop dependencies
-    implementation(compose.desktop.currentOs)
     
     // Kotlin Serialization for JSON parsing
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
@@ -68,11 +75,7 @@ kotlin {
     jvmToolchain(17)
 }
 
-compose.desktop {
-    application {
-        mainClass = "MainKt"
-    }
-}
+// Remove Compose Desktop configuration - not needed for IntelliJ Platform plugin
 
 intellijPlatform {
     pluginConfiguration {
@@ -99,7 +102,7 @@ intellijPlatform {
         """.trimIndent()
         
         ideaVersion {
-            sinceBuild = "223"
+            sinceBuild = "251"  // IntelliJ Platform 2025.1+ (required for Jewel bundled modules)
             untilBuild = "999.*"  // Support all future versions
         }
     }
@@ -127,7 +130,7 @@ intellijPlatform {
                     IntelliJPlatformType.WebStorm
                 )
                 channels = listOf(ProductRelease.Channel.RELEASE)
-                sinceBuild = "223"
+                sinceBuild = "251"  // IntelliJ Platform 2025.1+ (required for Jewel bundled modules)
                 untilBuild = "999.*"  // Support all future versions
             }
         }
@@ -152,7 +155,7 @@ tasks {
     }
     
     patchPluginXml {
-        sinceBuild = "223"
+        sinceBuild = "251"  // IntelliJ Platform 2025.1+ (required for Jewel bundled modules)
         untilBuild = "999.*"  // Support all future versions
         
         changeNotes = provider {
@@ -183,10 +186,7 @@ tasks.register("codeStandards") {
     dependsOn("detekt")
 }
 
-// Ensure Compose dependencies are available
-configurations.all {
-    exclude(group = "org.jetbrains.compose.material", module = "material")
-}
+// Configuration cleanup - using IntelliJ Platform bundled modules now
 
 // Detekt configuration
 detekt {
