@@ -1,6 +1,6 @@
 package com.claudecodechat.actions
 
-import com.claudecodechat.toolWindow.ClaudeChatToolWindowFactory
+import com.claudecodechat.ui.swing.ClaudeChatPanel
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
@@ -22,7 +22,7 @@ class SendToClaudeAction : AnAction() {
         toolWindow?.show {
             val contentManager = toolWindow.contentManager
             val content = contentManager.getContent(0)
-            val panel = content?.component as? ClaudeChatToolWindowFactory.ClaudeChatPanel
+            val panel = content?.component as? ClaudeChatPanel
             panel?.appendCodeToInput(selectedText)
         }
     }

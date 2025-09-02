@@ -15,112 +15,91 @@ class SlashCommandRegistry(private val project: Project) {
         return listOf(
             CompletionItem.SlashCommand(
                 name = "help",
-                description = "Get usage help",
-                icon = "❓"
+                description = "Get usage help"
             ),
             CompletionItem.SlashCommand(
                 name = "clear",
-                description = "Clear conversation history",
-                icon = "🧹"
+                description = "Clear conversation history"
             ),
             CompletionItem.SlashCommand(
                 name = "model",
                 description = "Select or change the AI model",
-                argumentHint = "[model-name]",
-                icon = "🤖"
+                argumentHint = "[model-name]"
             ),
             CompletionItem.SlashCommand(
                 name = "cost",
-                description = "Show token usage statistics",
-                icon = "💰"
+                description = "Show token usage statistics"
             ),
             CompletionItem.SlashCommand(
                 name = "config",
-                description = "View/modify configuration",
-                icon = "⚙️"
+                description = "View/modify configuration"
             ),
             CompletionItem.SlashCommand(
                 name = "review",
                 description = "Request code review",
-                argumentHint = "[file-or-directory]",
-                icon = "👁️"
+                argumentHint = "[file-or-directory]"
             ),
             CompletionItem.SlashCommand(
                 name = "init",
-                description = "Initialize project with CLAUDE.md guide",
-                icon = "🚀"
+                description = "Initialize project with CLAUDE.md guide"
             ),
             CompletionItem.SlashCommand(
                 name = "memory",
-                description = "Edit CLAUDE.md memory files",
-                icon = "🧠"
+                description = "Edit CLAUDE.md memory files"
             ),
             CompletionItem.SlashCommand(
                 name = "status",
-                description = "View account and system statuses",
-                icon = "📊"
+                description = "View account and system statuses"
             ),
             CompletionItem.SlashCommand(
                 name = "vim",
-                description = "Enter vim mode for alternating insert and command modes",
-                icon = "📝"
+                description = "Enter vim mode for alternating insert and command modes"
             ),
             CompletionItem.SlashCommand(
                 name = "compact",
                 description = "Compact conversation with optional focus instructions",
-                argumentHint = "[instructions]",
-                icon = "📦"
+                argumentHint = "[instructions]"
             ),
             CompletionItem.SlashCommand(
                 name = "add-dir",
                 description = "Add additional working directories",
-                argumentHint = "[directory-path]",
-                icon = "📁"
+                argumentHint = "[directory-path]"
             ),
             CompletionItem.SlashCommand(
                 name = "agents",
-                description = "Manage custom AI subagents for specialized tasks",
-                icon = "🤝"
+                description = "Manage custom AI subagents for specialized tasks"
             ),
             CompletionItem.SlashCommand(
                 name = "bug",
-                description = "Report bugs (sends conversation to Anthropic)",
-                icon = "🐛"
+                description = "Report bugs (sends conversation to Anthropic)"
             ),
             CompletionItem.SlashCommand(
                 name = "doctor",
-                description = "Checks the health of your Claude Code installation",
-                icon = "🏥"
+                description = "Checks the health of your Claude Code installation"
             ),
             CompletionItem.SlashCommand(
                 name = "login",
-                description = "Switch Anthropic accounts",
-                icon = "🔑"
+                description = "Switch Anthropic accounts"
             ),
             CompletionItem.SlashCommand(
                 name = "logout",
-                description = "Sign out from your Anthropic account",
-                icon = "🚪"
+                description = "Sign out from your Anthropic account"
             ),
             CompletionItem.SlashCommand(
                 name = "mcp",
-                description = "Manage MCP server connections and OAuth authentication",
-                icon = "🔌"
+                description = "Manage MCP server connections and OAuth authentication"
             ),
             CompletionItem.SlashCommand(
                 name = "permissions",
-                description = "View or update permissions",
-                icon = "🔒"
+                description = "View or update permissions"
             ),
             CompletionItem.SlashCommand(
                 name = "pr_comments",
-                description = "View pull request comments",
-                icon = "💬"
+                description = "View pull request comments"
             ),
             CompletionItem.SlashCommand(
                 name = "terminal-setup",
-                description = "Install Shift+Enter key binding for newlines",
-                icon = "⌨️"
+                description = "Install Shift+Enter key binding for newlines"
             )
         )
     }
@@ -222,8 +201,7 @@ class SlashCommandRegistry(private val project: Project) {
                             "$description (${source.name.lowercase()})"
                         },
                         argumentHint = argumentHint,
-                        source = source,
-                        icon = "📜"
+                        source = source
                     ))
                 }
             }

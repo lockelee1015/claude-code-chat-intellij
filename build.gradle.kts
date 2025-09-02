@@ -17,7 +17,23 @@ group = "com.claudecodechat"
 version = "1.0.3"
 
 repositories {
+    // 阿里云镜像 - 加速国内下载
+    maven {
+        url = uri("https://maven.aliyun.com/repository/public/")
+        name = "Aliyun Public"
+    }
+    maven {
+        url = uri("https://maven.aliyun.com/repository/central/")
+        name = "Aliyun Central"
+    }
+    maven {
+        url = uri("https://maven.aliyun.com/repository/gradle-plugin/")
+        name = "Aliyun Gradle Plugin"
+    }
+    
+    // 备用官方仓库
     mavenCentral()
+    gradlePluginPortal()
     
     intellijPlatform {
         defaultRepositories()

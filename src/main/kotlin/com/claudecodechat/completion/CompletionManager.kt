@@ -150,25 +150,27 @@ class CompletionManager(private val project: Project) {
      * Find completion trigger in text at cursor position
      */
     private fun findTrigger(text: String, cursorPosition: Int): Triple<CompletionTrigger, Int, String>? {
-        if (cursorPosition <= 0) return null
+        if (text.isEmpty() || cursorPosition <= 0 || cursorPosition > text.length) return null
         
         // Look backward from cursor to find trigger
-        var pos = cursorPosition - 1
-        while (pos >= 0) {
+        var pos = minOf(cursorPosition - 1, text.length - 1)
+        while (pos >= 0 && pos < text.length) {
             val char = text[pos]
             
             when (char) {
                 '/' -> {
-                    // Check if this is at word boundary (start or after whitespace)
-                    if (pos == 0 || text[pos - 1].isWhitespace()) {
-                        val query = text.substring(pos + 1, cursorPosition)
+                    // For slash commands, check if this is valid trigger position
+                    if (isValidSlashPosition(text, pos)) {
+                        val endPos = minOf(cursorPosition, text.length)
+                        val query = text.substring(pos + 1, endPos)
                         return Triple(CompletionTrigger.SLASH, pos, query)
                     }
                 }
                 '@' -> {
                     // Check if this is at word boundary (start or after whitespace)
-                    if (pos == 0 || text[pos - 1].isWhitespace()) {
-                        val query = text.substring(pos + 1, cursorPosition)
+                    if (pos == 0 || (pos > 0 && text[pos - 1].isWhitespace())) {
+                        val endPos = minOf(cursorPosition, text.length)
+                        val query = text.substring(pos + 1, endPos)
                         return Triple(CompletionTrigger.AT, pos, query)
                     }
                 }
@@ -183,6 +185,34 @@ class CompletionManager(private val project: Project) {
         }
         
         return null
+    }
+    
+    /**
+     * Check if the '/' at the given position is a valid slash command trigger
+     */
+    private fun isValidSlashPosition(text: String, slashPos: Int): Boolean {
+        // Must be at start or after whitespace
+        if (slashPos != 0 && !text[slashPos - 1].isWhitespace()) {
+            return false
+        }
+        
+        // If at start of text, it's valid
+        if (slashPos == 0) {
+            return true
+        }
+        
+        // Look backward from the slash to see if this is the start of a new line/command
+        // Find the beginning of this line
+        var lineStart = slashPos - 1
+        while (lineStart > 0 && text[lineStart - 1] != '\n') {
+            lineStart--
+        }
+        
+        // Check if there's already a slash command on this line before this position
+        val lineContent = text.substring(lineStart, slashPos).trim()
+        
+        // If the line content before this slash contains another slash command, reject
+        return !lineContent.contains('/')
     }
     
     /**
@@ -201,17 +231,13 @@ class CompletionManager(private val project: Project) {
         }
         
         return withContext(Dispatchers.Default) {
-            val files = mutableSetOf<VirtualFile>()
-            
             // Use ReadAction for thread safety
-            ReadAction.compute<Unit, Exception> {
+            val files = ReadAction.compute<Set<VirtualFile>, Exception> {
+                val fileSet = mutableSetOf<VirtualFile>()
                 val scope = GlobalSearchScope.projectScope(project)
                 
                 // Search by filename and path
                 FilenameIndex.processAllFileNames({ filename ->
-                    // Cancel if coroutine is cancelled
-                    if (!isActive) return@processAllFileNames false
-                    
                     // Support glob-style matching
                     if (matchesGlobPattern(filename, query) || 
                         filename.contains(query, ignoreCase = true)) {
@@ -221,27 +247,31 @@ class CompletionManager(private val project: Project) {
                             if (relativePath != null && 
                                 (relativePath.contains(query, ignoreCase = true) ||
                                  matchesGlobPattern(relativePath, query))) {
-                                files.add(file)
+                                fileSet.add(file)
                             }
                         }
                     }
                     true
                 }, scope, null)
+                
+                fileSet
             }
             
             if (!isActive) return@withContext emptyList()
             
             files.take(20).mapNotNull { file ->
-                val relativePath = getRelativePath(file)
-                if (relativePath != null) {
-                    CompletionItem.FileReference(
-                        path = file.path,
-                        fileName = file.name,
-                        relativePath = relativePath,
-                        fileType = file.extension,
-                        icon = getFileIcon(file.extension)
-                    )
-                } else null
+                ReadAction.compute<CompletionItem.FileReference?, Exception> {
+                    val relativePath = getRelativePath(file)
+                    if (relativePath != null) {
+                        CompletionItem.FileReference(
+                            path = file.path,
+                            fileName = file.name,
+                            relativePath = relativePath,
+                            fileType = file.extension,
+                            icon = getFileIcon(file.extension)
+                        )
+                    } else null
+                }
             }.sortedWith(compareBy<CompletionItem.FileReference> { item ->
                 // Prioritize path matches over filename matches
                 when {
@@ -277,11 +307,52 @@ class CompletionManager(private val project: Project) {
     }
     
     /**
-     * Get recent files (placeholder implementation)
+     * Get recent files from editor and project
      */
-    private fun getRecentFiles(): List<CompletionItem.FileReference> {
-        // TODO: Implement recent files tracking
-        return emptyList()
+    private suspend fun getRecentFiles(): List<CompletionItem.FileReference> {
+        return withContext(Dispatchers.Default) {
+            try {
+                ReadAction.compute<List<CompletionItem.FileReference>, Exception> {
+                    val files = mutableSetOf<VirtualFile>()
+                    
+                    // Get currently open files
+                    val fileEditorManager = com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project)
+                    files.addAll(fileEditorManager.openFiles)
+                    
+                    // Get some project files if we don't have many open files
+                    if (files.size < 10) {
+                        val scope = GlobalSearchScope.projectScope(project)
+                        var count = 0
+                        FilenameIndex.processAllFileNames({ filename ->
+                            if (count >= 20) return@processAllFileNames false
+                            
+                            FilenameIndex.getVirtualFilesByName(filename, scope).forEach { file ->
+                                if (count < 20 && (file.extension in setOf("kt", "java", "js", "ts", "py", "md", "txt", "json", "xml", "html", "css"))) {
+                                    files.add(file)
+                                    count++
+                                }
+                            }
+                            true
+                        }, scope, null)
+                    }
+                    
+                    files.mapNotNull { file ->
+                        val relativePath = getRelativePath(file)
+                        if (relativePath != null) {
+                            CompletionItem.FileReference(
+                                path = file.path,
+                                fileName = file.name,
+                                relativePath = relativePath,
+                                fileType = file.extension,
+                                icon = getFileIcon(file.extension)
+                            )
+                        } else null
+                    }.take(15)
+                }
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
     }
     
     /**
@@ -297,22 +368,7 @@ class CompletionManager(private val project: Project) {
      * Get icon for file type
      */
     private fun getFileIcon(extension: String?): String {
-        return when (extension?.lowercase()) {
-            "kt" -> "🟪"
-            "java" -> "☕"
-            "js", "jsx" -> "🟨"
-            "ts", "tsx" -> "🔷"
-            "py" -> "🐍"
-            "md" -> "📝"
-            "json" -> "📄"
-            "xml" -> "📋"
-            "yml", "yaml" -> "📊"
-            "txt" -> "📄"
-            "html" -> "🌐"
-            "css" -> "🎨"
-            "sql" -> "🗃️"
-            else -> "📄"
-        }
+        return ""
     }
     
     /**

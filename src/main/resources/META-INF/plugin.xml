@@ -51,9 +51,9 @@
                 id="com.claudecodechat.settings"
                 displayName="Claude Code Chat"/>
         
-        <!-- Application Service -->
-        <applicationService
-                serviceImplementation="com.claudecodechat.services.ClaudeApiService"/>
+        <!-- CLI Service -->
+        <projectService
+                serviceImplementation="com.claudecodechat.cli.ClaudeCliService"/>
         
         <!-- Settings Service -->
         <applicationService
