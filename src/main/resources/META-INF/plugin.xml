@@ -55,6 +55,10 @@
         <applicationService
                 serviceImplementation="com.claudecodechat.services.ClaudeApiService"/>
         
+        <!-- Settings Service -->
+        <applicationService
+                serviceImplementation="com.claudecodechat.settings.ClaudeSettings"/>
+        
         <!-- Project Service -->
         <projectService
                 serviceImplementation="com.claudecodechat.services.ChatHistoryService"/>

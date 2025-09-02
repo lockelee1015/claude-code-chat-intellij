@@ -84,13 +84,14 @@ class ClaudeChatToolWindowFactory : ToolWindowFactory {
             if (message.isEmpty()) return
             
             val settings = ClaudeSettings.getInstance()
-            val apiKey = settings.apiKey
+            // TODO: Remove API dependency - using Claude CLI instead
+            val apiKey = "" // settings.apiKey
             
             if (apiKey.isBlank()) {
                 Messages.showErrorDialog(
                     project,
-                    "Please configure your Claude API key in Settings → Tools → Claude Code Chat",
-                    "API Key Not Configured"
+                    "Claude Code integration is now using CLI. Please use the CLI features.",
+                    "Using Claude CLI"
                 )
                 return
             }
@@ -105,8 +106,8 @@ class ClaudeChatToolWindowFactory : ToolWindowFactory {
                     val response = ClaudeApiService.getInstance().sendMessage(
                         message = message,
                         apiKey = apiKey,
-                        model = settings.model,
-                        maxTokens = settings.maxTokens
+                        model = "claude-3-sonnet-20240229", // settings.model
+                        maxTokens = 4096 // settings.maxTokens
                     )
                     
                     response.fold(

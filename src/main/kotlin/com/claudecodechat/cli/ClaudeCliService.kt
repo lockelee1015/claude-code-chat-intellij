@@ -4,6 +4,7 @@ import com.claudecodechat.models.ClaudeStreamMessage
 import com.claudecodechat.models.MessageType
 import com.claudecodechat.models.ErrorInfo
 import com.claudecodechat.utils.JsonUtils
+import com.claudecodechat.settings.ClaudeSettings
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
@@ -63,7 +64,12 @@ class ClaudeCliService(private val project: Project) {
     ) {
         val processId = generateProcessId()
         val args = buildCommandArgs(options)
-        val claudeBinary = findClaudeBinary()
+        val settings = ClaudeSettings.getInstance()
+        val claudeBinary = if (settings.claudePath.isNotEmpty()) {
+            settings.claudePath
+        } else {
+            findClaudeBinary()
+        }
         
         logger.info("Executing Claude Code CLI:")
         logger.info("  Binary: $claudeBinary")
@@ -83,6 +89,12 @@ class ClaudeCliService(private val project: Project) {
             val nodePath = "${System.getProperty("user.home")}/.nvm/versions/node/v22.17.0/bin"
             if (!currentPath.contains(nodePath)) {
                 env["PATH"] = "$nodePath:$currentPath"
+            }
+            
+            // Add custom environment variables from settings
+            parseEnvironmentVariables(settings.environmentVariables).forEach { (key, value) ->
+                env[key] = value
+                logger.info("Set environment variable: $key=$value")
             }
             
             // Start the process
@@ -338,6 +350,27 @@ class ClaudeCliService(private val project: Project) {
     
     private fun generateProcessId(): String {
         return "claude-${System.currentTimeMillis()}-${(Math.random() * 10000).toInt()}"
+    }
+    
+    /**
+     * Parse environment variables from a string in the format "KEY=VALUE" (one per line)
+     */
+    private fun parseEnvironmentVariables(envVarsText: String): Map<String, String> {
+        if (envVarsText.isBlank()) return emptyMap()
+        
+        return envVarsText.lines()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && !it.startsWith("#") }
+            .mapNotNull { line ->
+                val parts = line.split("=", limit = 2)
+                if (parts.size == 2) {
+                    parts[0].trim() to parts[1].trim()
+                } else {
+                    logger.warn("Invalid environment variable format: $line")
+                    null
+                }
+            }
+            .toMap()
     }
     
     fun dispose() {

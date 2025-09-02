@@ -11,10 +11,8 @@ import com.intellij.util.xmlb.XmlSerializerUtil
     storages = [Storage("ClaudeCodeChatSettings.xml")]
 )
 class ClaudeSettings : PersistentStateComponent<ClaudeSettings> {
-    var apiKey: String = ""
-    var model: String = "claude-3-sonnet-20240229"
-    var maxTokens: Int = 4096
-    var temperature: Double = 0.7
+    var claudePath: String = ""
+    var environmentVariables: String = ""
     
     companion object {
         fun getInstance(): ClaudeSettings {

@@ -1,13 +1,14 @@
 package com.claudecodechat.settings
 
 import com.intellij.openapi.options.Configurable
-import com.intellij.openapi.ui.ComboBox
 import com.intellij.ui.components.JBLabel
-import com.intellij.ui.components.JBPasswordField
 import com.intellij.ui.components.JBTextField
+import com.intellij.ui.components.JBTextArea
+import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.FormBuilder
 import javax.swing.JComponent
 import javax.swing.JPanel
+import java.awt.Dimension
 
 class ClaudeSettingsConfigurable : Configurable {
     private var settingsComponent: ClaudeSettingsComponent? = null
@@ -25,30 +26,24 @@ class ClaudeSettingsConfigurable : Configurable {
         val settings = ClaudeSettings.getInstance()
         val component = settingsComponent ?: return false
         
-        return component.apiKey != settings.apiKey ||
-                component.model != settings.model ||
-                component.maxTokens != settings.maxTokens ||
-                component.temperature != settings.temperature
+        return component.claudePath != settings.claudePath ||
+                component.environmentVariables != settings.environmentVariables
     }
     
     override fun apply() {
         val settings = ClaudeSettings.getInstance()
         val component = settingsComponent ?: return
         
-        settings.apiKey = component.apiKey
-        settings.model = component.model
-        settings.maxTokens = component.maxTokens
-        settings.temperature = component.temperature
+        settings.claudePath = component.claudePath
+        settings.environmentVariables = component.environmentVariables
     }
     
     override fun reset() {
         val settings = ClaudeSettings.getInstance()
         val component = settingsComponent ?: return
         
-        component.apiKey = settings.apiKey
-        component.model = settings.model
-        component.maxTokens = settings.maxTokens
-        component.temperature = settings.temperature
+        component.claudePath = settings.claudePath
+        component.environmentVariables = settings.environmentVariables
     }
     
     override fun disposeUIResources() {
@@ -57,40 +52,22 @@ class ClaudeSettingsConfigurable : Configurable {
     
     class ClaudeSettingsComponent {
         val panel: JPanel
-        private val apiKeyField = JBPasswordField()
-        private val modelComboBox = ComboBox(arrayOf(
-            "claude-3-opus-20240229",
-            "claude-3-sonnet-20240229",
-            "claude-3-haiku-20240307",
-            "claude-2.1",
-            "claude-2.0"
-        ))
-        private val maxTokensField = JBTextField()
-        private val temperatureField = JBTextField()
+        private val claudePathField = JBTextField()
+        private val environmentVariablesArea = JBTextArea(5, 40)
         
         init {
             panel = FormBuilder.createFormBuilder()
                 .addLabeledComponent(
-                    JBLabel("API Key:"),
-                    apiKeyField,
+                    JBLabel("Claude Executable Path (empty to use PATH):"),
+                    claudePathField,
                     1,
                     false
                 )
                 .addLabeledComponent(
-                    JBLabel("Model:"),
-                    modelComboBox,
-                    1,
-                    false
-                )
-                .addLabeledComponent(
-                    JBLabel("Max Tokens:"),
-                    maxTokensField,
-                    1,
-                    false
-                )
-                .addLabeledComponent(
-                    JBLabel("Temperature (0.0 - 1.0):"),
-                    temperatureField,
+                    JBLabel("Environment Variables (KEY=VALUE, one per line):"),
+                    JBScrollPane(environmentVariablesArea).apply {
+                        preferredSize = Dimension(400, 100)
+                    },
                     1,
                     false
                 )
@@ -98,28 +75,16 @@ class ClaudeSettingsConfigurable : Configurable {
                 .panel
         }
         
-        var apiKey: String
-            get() = String(apiKeyField.password)
+        var claudePath: String
+            get() = claudePathField.text
             set(value) {
-                apiKeyField.text = value
+                claudePathField.text = value
             }
         
-        var model: String
-            get() = modelComboBox.selectedItem as? String ?: "claude-3-sonnet-20240229"
+        var environmentVariables: String
+            get() = environmentVariablesArea.text
             set(value) {
-                modelComboBox.selectedItem = value
-            }
-        
-        var maxTokens: Int
-            get() = maxTokensField.text.toIntOrNull() ?: 4096
-            set(value) {
-                maxTokensField.text = value.toString()
-            }
-        
-        var temperature: Double
-            get() = temperatureField.text.toDoubleOrNull() ?: 0.7
-            set(value) {
-                temperatureField.text = value.toString()
+                environmentVariablesArea.text = value
             }
     }
 }
