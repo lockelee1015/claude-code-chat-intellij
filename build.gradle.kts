@@ -25,6 +25,8 @@ repositories {
     // Temporary: Keep external Compose repos while testing Jewel bridge
     maven("https://maven.pkg.jetbrains.space/public/p/compose/dev")
     maven("https://packages.jetbrains.team/maven/p/kmp/public/")
+    // Add Space Maven repo for Jewel
+    maven("https://maven.pkg.jetbrains.space/public/p/jewel/dev")
     
     intellijPlatform {
         defaultRepositories()
@@ -43,18 +45,12 @@ dependencies {
         zipSigner()
         testFramework(TestFrameworkType.Platform)
         
-        // TODO: Try bundled modules when they become available in stable release
-        // bundledModule("intellij.platform.jewel")
+        // TODO: Add Jewel bundled modules when correct names are determined
+        // Current available modules need to be discovered
     }
     
     // External Compose dependencies
     implementation(compose.desktop.currentOs)
-    
-    // Add Jewel as external dependency for SwingBridgeTheme
-    // This is temporary until bundled modules work properly
-    implementation("org.jetbrains.jewel:jewel-bridge-theme:0.28.2")
-    implementation("org.jetbrains.jewel:jewel-foundation:0.28.2")
-    implementation("org.jetbrains.jewel:jewel-ui:0.28.2")
     
     // Kotlin Serialization for JSON parsing
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")

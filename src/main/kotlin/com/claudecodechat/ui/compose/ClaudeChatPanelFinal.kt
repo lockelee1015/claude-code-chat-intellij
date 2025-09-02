@@ -12,7 +12,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.*
-import org.jetbrains.jewel.bridge.theme.SwingBridgeTheme
+// TODO: Re-enable when Jewel bundled modules are available
+// import org.jetbrains.jewel.bridge.theme.SwingBridgeTheme
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -96,7 +97,8 @@ class ClaudeChatPanelFinal(private val project: Project) {
     
     @Composable
     private fun ClaudeChatContent() {
-        SwingBridgeTheme {
+        // TODO: Wrap with SwingBridgeTheme when available
+        // SwingBridgeTheme {
             val messages by viewModel.messages.collectAsState()
             val isLoading by viewModel.isLoading.collectAsState()
             val currentSession by viewModel.currentSession.collectAsState()
@@ -280,7 +282,7 @@ class ClaudeChatPanelFinal(private val project: Project) {
             )
             } // End of Column
         } // End of Box
-        } // End of SwingBridgeTheme
+        // } // End of SwingBridgeTheme (TODO: re-enable)
     }
     
     @Composable
