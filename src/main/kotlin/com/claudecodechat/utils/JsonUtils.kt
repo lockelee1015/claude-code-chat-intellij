@@ -2,7 +2,6 @@ package com.claudecodechat.utils
 
 import com.claudecodechat.models.ClaudeStreamMessage
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.decodeFromString
 
 /**
  * Utility object for JSON parsing operations

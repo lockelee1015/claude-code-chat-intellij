@@ -259,7 +259,8 @@ class SessionHistoryLoader {
                 role = "user",
                 content = content
             ),
-            timestamp = obj["timestamp"]?.jsonPrimitive?.content
+            timestamp = obj["timestamp"]?.jsonPrimitive?.content,
+            isMeta = obj["isMeta"]?.jsonPrimitive?.content?.toBoolean() ?: false
         )
     }
     
@@ -282,7 +283,8 @@ class SessionHistoryLoader {
                 role = "assistant",
                 content = content
             ),
-            timestamp = obj["timestamp"]?.jsonPrimitive?.content
+            timestamp = obj["timestamp"]?.jsonPrimitive?.content,
+            isMeta = obj["isMeta"]?.jsonPrimitive?.content?.toBoolean() ?: false
         )
     }
     
@@ -298,7 +300,8 @@ class SessionHistoryLoader {
                 role = "assistant",
                 content = content
             ),
-            timestamp = obj["timestamp"]?.jsonPrimitive?.content
+            timestamp = obj["timestamp"]?.jsonPrimitive?.content,
+            isMeta = obj["isMeta"]?.jsonPrimitive?.content?.toBoolean() ?: false
         )
     }
     
@@ -318,7 +321,8 @@ class SessionHistoryLoader {
                 type = MessageType.SYSTEM,
                 subtype = "init",
                 sessionId = sessionId,
-                projectId = projectId
+                projectId = projectId,
+                isMeta = obj["isMeta"]?.jsonPrimitive?.content?.toBoolean() ?: false
             )
         }
         return null
@@ -354,6 +358,11 @@ class SessionHistoryLoader {
      * Filter out messages that shouldn't be displayed
      */
     private fun shouldIncludeMessage(message: ClaudeStreamMessage): Boolean {
+        // Skip meta messages
+        if (message.isMeta) {
+            return false
+        }
+        
         // Skip system messages except for init
         if (message.type == MessageType.SYSTEM && message.subtype != "init") {
             return false

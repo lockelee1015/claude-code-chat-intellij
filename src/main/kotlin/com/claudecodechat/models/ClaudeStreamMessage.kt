@@ -20,7 +20,7 @@ data class ClaudeStreamMessage(
     val error: ErrorInfo? = null,
     @SerialName("checkpoint_data")
     val checkpointData: JsonElement? = null,
-    @SerialName("is_meta")
+    @SerialName("isMeta")
     val isMeta: Boolean = false,
     @SerialName("leaf_uuid")
     val leafUuid: String? = null,
@@ -118,3 +118,4 @@ data class SessionMetrics(
     var totalInputTokens: Int = 0,
     var totalOutputTokens: Int = 0
 )
+

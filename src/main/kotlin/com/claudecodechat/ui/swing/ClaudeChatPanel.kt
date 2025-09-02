@@ -18,6 +18,8 @@ import com.intellij.ui.JBColor
 import com.intellij.ui.components.*
 import com.intellij.ui.awt.RelativePoint
 import com.intellij.util.ui.JBUI
+import com.intellij.ui.JBIntSpinner
+import com.intellij.ui.scale.JBUIScale
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
 import java.awt.*
@@ -508,51 +510,24 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
             chatArea.text = ""
             
             try {
-                for (message in messages) {
-                    when (message.type) {
-                        MessageType.USER -> {
-                            val userText = message.message?.content?.firstOrNull()?.text ?: ""
-                            addStyledText(doc, style, "[You]: ", Color.decode("#4A90E2"), true)
-                            addStyledText(doc, style, "$userText\n\n", JBColor.foreground(), false)
+                // Group messages to handle tool use/result pairs
+                val groupedMessages = groupToolMessages(messages)
+                
+                for (group in groupedMessages) {
+                    when (group.type) {
+                        "user" -> {
+                            val userText = group.content
+                            addMessageWithIcon(doc, style, userText, MessageType.USER)
                         }
-                        MessageType.ASSISTANT -> {
-                            addStyledText(doc, style, "[Claude]: ", Color.decode("#50C878"), true)
-                            message.message?.content?.forEach { content ->
-                                when (content.type) {
-                                    com.claudecodechat.models.ContentType.TEXT -> {
-                                        if (content.text != null) {
-                                            addStyledText(doc, style, "${content.text}\n", JBColor.foreground(), false)
-                                        }
-                                    }
-                                    com.claudecodechat.models.ContentType.TOOL_USE -> {
-                                        // Display tool calls
-                                        addStyledText(doc, style, "🛠️ Tool: ${content.name ?: "unknown"}\n", Color.decode("#FFA500"), true)
-                                        if (content.input != null) {
-                                            addStyledText(doc, style, "  Input: ${content.input}\n", Color.decode("#808080"), false)
-                                        }
-                                    }
-                                    com.claudecodechat.models.ContentType.TOOL_RESULT -> {
-                                        // Display tool results
-                                        val resultColor = if (content.isError == true) Color.decode("#FF6B6B") else Color.decode("#90EE90")
-                                        val resultPrefix = if (content.isError == true) "❌ Tool Error: " else "✅ Tool Result: "
-                                        addStyledText(doc, style, resultPrefix, resultColor, true)
-                                        if (content.content != null) {
-                                            addStyledText(doc, style, "${content.content}\n", resultColor, false)
-                                        } else if (content.text != null) {
-                                            addStyledText(doc, style, "${content.text}\n", resultColor, false)
-                                        }
-                                    }
-                                }
-                            }
-                            addStyledText(doc, style, "\n", JBColor.foreground(), false)
+                        "assistant" -> {
+                            addMessageWithIcon(doc, style, group.content, MessageType.ASSISTANT)
                         }
-                        MessageType.ERROR -> {
-                            val errorText = message.error?.message ?: "Unknown error"
-                            addStyledText(doc, style, "[Error]: ", Color.decode("#FF6B6B"), true)
-                            addStyledText(doc, style, "$errorText\n\n", Color.decode("#FF6B6B"), false)
+                        "tool_interaction" -> {
+                            // Display tool use and result together
+                            addToolInteraction(doc, style, group.toolUse, group.toolResult)
                         }
-                        else -> {
-                            // Handle other message types if needed
+                        "error" -> {
+                            addMessageWithIcon(doc, style, group.content, MessageType.ERROR)
                         }
                     }
                 }
@@ -566,10 +541,499 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         }
     }
     
+    private data class MessageGroup(
+        val type: String, // "user", "assistant", "tool_interaction", "error"
+        val content: String = "",
+        val toolUse: com.claudecodechat.models.Content? = null,
+        val toolResult: com.claudecodechat.models.Content? = null
+    )
+    
+    private fun groupToolMessages(messages: List<ClaudeStreamMessage>): List<MessageGroup> {
+        val groups = mutableListOf<MessageGroup>()
+        val pendingToolUses = mutableMapOf<String, com.claudecodechat.models.Content>()
+        
+        for (message in messages) {
+            when (message.type) {
+                MessageType.USER -> {
+                    // Skip meta messages
+                    if (message.isMeta) {
+                        continue
+                    }
+                    
+                    // Check if this user message contains tool results
+                    val toolResults = message.message?.content?.filter { it.type == com.claudecodechat.models.ContentType.TOOL_RESULT }
+                    if (toolResults?.isNotEmpty() == true) {
+                        // This is a tool result message, try to pair with pending tool uses
+                        for (toolResult in toolResults) {
+                            val toolUseId = toolResult.toolUseId
+                            if (toolUseId != null && pendingToolUses.containsKey(toolUseId)) {
+                                val toolUse = pendingToolUses.remove(toolUseId)
+                                groups.add(MessageGroup(
+                                    type = "tool_interaction",
+                                    toolUse = toolUse,
+                                    toolResult = toolResult
+                                ))
+                            } else {
+                                // Orphaned tool result
+                                groups.add(MessageGroup(
+                                    type = "tool_interaction",
+                                    toolUse = null,
+                                    toolResult = toolResult
+                                ))
+                            }
+                        }
+                    } else {
+                        // Check if this is a command message by looking at the raw text content
+                        val userText = message.message?.content?.firstOrNull()?.text ?: ""
+                        if (userText.contains("<command-message>") && userText.contains("<command-name>")) {
+                            val commandDisplay = formatCommandMessage(userText)
+                            if (commandDisplay.isNotEmpty()) {
+                                groups.add(MessageGroup(type = "user", content = commandDisplay))
+                            }
+                        } else if (userText.isNotEmpty()) {
+                            groups.add(MessageGroup(type = "user", content = userText))
+                        }
+                    }
+                }
+                MessageType.ASSISTANT -> {
+                    message.message?.content?.forEach { content ->
+                        when (content.type) {
+                            com.claudecodechat.models.ContentType.TEXT -> {
+                                if (content.text != null && content.text.isNotEmpty()) {
+                                    groups.add(MessageGroup(type = "assistant", content = content.text))
+                                }
+                            }
+                            com.claudecodechat.models.ContentType.TOOL_USE -> {
+                                // Store tool use for later pairing with result
+                                if (content.id != null) {
+                                    pendingToolUses[content.id] = content
+                                }
+                            }
+                            else -> {}
+                        }
+                    }
+                }
+                MessageType.ERROR -> {
+                    val errorText = message.error?.message ?: "Unknown error"
+                    groups.add(MessageGroup(type = "error", content = errorText))
+                }
+                else -> {}
+            }
+        }
+        
+        // Handle any remaining unpaired tool uses
+        for (toolUse in pendingToolUses.values) {
+            groups.add(MessageGroup(
+                type = "tool_interaction",
+                toolUse = toolUse,
+                toolResult = null
+            ))
+        }
+        
+        return groups
+    }
+    
+    private fun addToolInteraction(doc: StyledDocument, style: MutableAttributeSet, toolUse: com.claudecodechat.models.Content?, toolResult: com.claudecodechat.models.Content?) {
+        // Use same layout as messages: left margin + icon area
+        val leftMargin = "  " // 2 spaces for left margin
+        val iconWidth = 4      // 4 chars total for icon area
+        
+        // Add left margin
+        doc.insertString(doc.length, leftMargin, null)
+        
+        // Add tool icon with fixed width
+        val iconStyle = StyleContext.getDefaultStyleContext().getStyle(StyleContext.DEFAULT_STYLE)
+        val isError = toolResult?.isError == true
+        val iconColor = if (isError) Color.decode("#FF6B6B") else Color.decode("#50C878") // Red for error, green for success
+        StyleConstants.setForeground(iconStyle, iconColor)
+        StyleConstants.setBold(iconStyle, true)
+        
+        // Icon area: icon + padding to fixed width
+        val iconArea = "⏺".padEnd(iconWidth) // Record button symbol with padding
+        doc.insertString(doc.length, iconArea, iconStyle)
+        
+        // Format tool display
+        val toolName = toolUse?.name ?: "Unknown"
+        val inputString = toolUse?.input?.toString() ?: ""
+        val formattedDisplay = formatToolDisplay(toolName, inputString, toolResult)
+        
+        val textColor = JBColor.foreground() // Use normal text color, not secondary
+        val textStyle = StyleContext.getDefaultStyleContext().getStyle(StyleContext.DEFAULT_STYLE)
+        StyleConstants.setForeground(textStyle, textColor)
+        
+        val lines = formattedDisplay.split("\n")
+        for (i in lines.indices) {
+            val line = lines[i]
+            
+            if (i == 0) {
+                // First line: tool name should be bold
+                val parts = line.split("(", limit = 2)
+                if (parts.size == 2) {
+                    // Tool name part (bold)
+                    StyleConstants.setBold(textStyle, true)
+                    doc.insertString(doc.length, parts[0], textStyle)
+                    
+                    // Parameters part (normal)
+                    StyleConstants.setBold(textStyle, false)
+                    doc.insertString(doc.length, "(${parts[1]}", textStyle)
+                } else {
+                    StyleConstants.setBold(textStyle, true)
+                    doc.insertString(doc.length, line, textStyle)
+                }
+            } else {
+                // Continuation lines with proper indentation matching icon area
+                StyleConstants.setBold(textStyle, false)
+                val continuationIndent = leftMargin + " ".repeat(iconWidth)
+                doc.insertString(doc.length, "\n$continuationIndent$line", textStyle)
+            }
+        }
+        
+        doc.insertString(doc.length, "\n\n", null)
+    }
+    
+    private fun formatToolDisplay(toolName: String, input: String, toolResult: com.claudecodechat.models.Content?): String {
+        val result = mutableListOf<String>()
+        
+        // Parse input JSON to extract key parameters
+        val params = extractToolParameters(toolName, input)
+        val toolDisplay = "$toolName($params)"
+        result.add(toolDisplay)
+        
+        // Add result summary with tree symbol
+        if (toolResult != null) {
+            val resultSummary = formatToolResult(toolName, toolResult)
+            if (resultSummary.isNotEmpty()) {
+                result.add("⎿  $resultSummary") // Tree continuation symbol
+            }
+        }
+        
+        return result.joinToString("\n")
+    }
+    
+    private fun extractToolParameters(toolName: String, input: String): String {
+        if (input.isEmpty()) return ""
+        
+        try {
+            // Simple JSON parsing for common parameters
+            return when (toolName.lowercase()) {
+                "read" -> {
+                    val filePathMatch = Regex(""""file_path"\s*:\s*"([^"]*)"""").find(input)
+                    val fullPath = filePathMatch?.groupValues?.get(1) ?: ""
+                    removeProjectPrefix(fullPath)
+                }
+                "write" -> {
+                    val filePathMatch = Regex(""""file_path"\s*:\s*"([^"]*)"""").find(input)
+                    val fullPath = filePathMatch?.groupValues?.get(1) ?: ""
+                    removeProjectPrefix(fullPath)
+                }
+                "edit" -> {
+                    val filePathMatch = Regex(""""file_path"\s*:\s*"([^"]*)"""").find(input)
+                    val fullPath = filePathMatch?.groupValues?.get(1) ?: ""
+                    removeProjectPrefix(fullPath)
+                }
+                "multiedit" -> {
+                    val filePathMatch = Regex(""""file_path"\s*:\s*"([^"]*)"""").find(input)
+                    val fullPath = filePathMatch?.groupValues?.get(1) ?: ""
+                    removeProjectPrefix(fullPath)
+                }
+                "bash" -> {
+                    val commandMatch = Regex(""""command"\s*:\s*"([^"]*)"""").find(input)
+                    commandMatch?.groupValues?.get(1)?.take(50) ?: ""
+                }
+                "grep" -> {
+                    val patternMatch = Regex(""""pattern"\s*:\s*"([^"]*)"""").find(input)
+                    val pattern = patternMatch?.groupValues?.get(1) ?: ""
+                    val pathMatch = Regex(""""path"\s*:\s*"([^"]*)"""").find(input)
+                    val path = pathMatch?.groupValues?.get(1)
+                    if (path != null) "\"$pattern\" in $path" else "\"$pattern\""
+                }
+                "glob" -> {
+                    val patternMatch = Regex(""""pattern"\s*:\s*"([^"]*)"""").find(input)
+                    patternMatch?.groupValues?.get(1) ?: ""
+                }
+                else -> ""
+            }
+        } catch (e: Exception) {
+            return ""
+        }
+    }
+    
+    private fun removeProjectPrefix(fullPath: String): String {
+        if (fullPath.isEmpty()) return fullPath
+        
+        try {
+            val projectBasePath = project.basePath
+            if (projectBasePath != null && fullPath.startsWith(projectBasePath)) {
+                val relativePath = fullPath.substring(projectBasePath.length)
+                return if (relativePath.startsWith("/")) relativePath.substring(1) else relativePath
+            }
+        } catch (e: Exception) {
+            // Fallback to original path if anything goes wrong
+        }
+        
+        return fullPath
+    }
+    
+    private fun formatCommandMessage(content: String): String {
+        try {
+            val commandNameMatch = Regex("<command-name>([^<]+)</command-name>").find(content)
+            val commandArgsMatch = Regex("<command-args>([^<]*)</command-args>").find(content)
+            
+            val commandName = commandNameMatch?.groupValues?.get(1)?.trim() ?: ""
+            val commandArgs = commandArgsMatch?.groupValues?.get(1)?.trim() ?: ""
+            
+            return if (commandName.isNotEmpty()) {
+                if (commandArgs.isNotEmpty()) {
+                    "$commandName $commandArgs"
+                } else {
+                    commandName
+                }
+            } else {
+                ""
+            }
+        } catch (e: Exception) {
+            return ""
+        }
+    }
+    
+    private fun formatToolResult(toolName: String, toolResult: com.claudecodechat.models.Content): String {
+        if (toolResult.isError == true) {
+            return "Error: ${toolResult.content ?: toolResult.text ?: "Unknown error"}"
+        }
+        
+        val content = toolResult.content ?: toolResult.text ?: ""
+        
+        return when (toolName.lowercase()) {
+            "read" -> {
+                val lines = content.split("\n").size
+                "Read $lines lines"
+            }
+            "write" -> {
+                if (content.contains("successfully") || content.contains("written")) {
+                    "File written successfully"
+                } else {
+                    "File written"
+                }
+            }
+            "edit", "multiedit" -> {
+                // Try to extract diff-like information from the result
+                formatEditResult(content)
+            }
+            "bash" -> {
+                val lines = content.trim().split("\n")
+                if (lines.size <= 3 && content.length <= 100) {
+                    content.trim()
+                } else {
+                    "Command executed (${lines.size} lines output)"
+                }
+            }
+            "grep" -> {
+                if (content.startsWith("Found")) {
+                    content.split("\n").first() // Just the "Found X files" line
+                } else {
+                    val lines = content.split("\n")
+                    "Found ${lines.size} matches"
+                }
+            }
+            "glob" -> {
+                val lines = content.split("\n")
+                "Found ${lines.size} files"
+            }
+            else -> {
+                // Generic result formatting
+                if (content.length <= 100) {
+                    content.trim()
+                } else {
+                    content.take(97) + "..."
+                }
+            }
+        }
+    }
+    
+    private fun formatEditResult(content: String): String {
+        // Extract diff-like information from edit results
+        try {
+            // Look for diff-style content showing changes
+            val lines = content.split("\n")
+            val diffLines = mutableListOf<String>()
+            
+            var inDiff = false
+            var addedLines = 0
+            var removedLines = 0
+            
+            for (line in lines) {
+                when {
+                    line.contains("→") -> {
+                        // This is a line from the diff output
+                        inDiff = true
+                        diffLines.add(line)
+                    }
+                    line.startsWith("+") && inDiff -> {
+                        addedLines++
+                        // Extract the actual added content without the + prefix
+                        val addedText = line.substring(1).trim()
+                        if (addedText.isNotEmpty()) {
+                            diffLines.add("+ $addedText")
+                        }
+                    }
+                    line.startsWith("-") && inDiff -> {
+                        removedLines++
+                        // Don't show removed lines in summary, just count them
+                    }
+                }
+            }
+            
+            if (diffLines.isNotEmpty()) {
+                val summary = if (addedLines > 0) {
+                    "Updated CLAUDE.md with $addedLines additions"
+                } else {
+                    "Applied edit"
+                }
+                
+                // Return summary + key diff lines
+                val result = mutableListOf(summary)
+                
+                // Add a few key diff lines to show what was changed
+                diffLines.take(8).forEach { diffLine ->
+                    when {
+                        diffLine.contains("→") -> {
+                            // Line number - extract the actual content
+                            val match = Regex("""\s*(\d+)→(.*)$""").find(diffLine)
+                            if (match != null) {
+                                val lineContent = match.groupValues[2].trim()
+                                if (lineContent.isNotEmpty() && !lineContent.startsWith("#") && !lineContent.startsWith("`")) {
+                                    result.add("    ${match.groupValues[1]}")
+                                }
+                            }
+                        }
+                        diffLine.startsWith("+") -> {
+                            val addedContent = diffLine.substring(1).trim()
+                            if (addedContent.isNotEmpty()) {
+                                result.add("    + $addedContent")
+                            }
+                        }
+                    }
+                }
+                
+                return result.joinToString("\n")
+            }
+            
+            // Fallback: check for "Applied X edit(s)" pattern
+            val editMatch = Regex("""Applied (\d+) edit""").find(content)
+            if (editMatch != null) {
+                val count = editMatch.groupValues[1]
+                return "Applied $count edit${if (count != "1") "s" else ""}"
+            }
+            
+        } catch (e: Exception) {
+            // Ignore parsing errors and fall back
+        }
+        
+        return "File edited"
+    }
+    
     private fun addStyledText(doc: StyledDocument, style: MutableAttributeSet, text: String, color: Color, bold: Boolean) {
         StyleConstants.setForeground(style, color)
         StyleConstants.setBold(style, bold)
         doc.insertString(doc.length, text, style)
+    }
+    
+    private fun addMessageWithIcon(doc: StyledDocument, style: MutableAttributeSet, text: String, messageType: MessageType) {
+        // Create fixed-width layout with proper left margin: margin + icon area + text area
+        val leftMargin = "  " // 2 spaces for left margin
+        val iconWidth = 4      // 4 chars total for icon area
+        
+        // Add left margin
+        doc.insertString(doc.length, leftMargin, null)
+        
+        // Add icon with fixed width
+        val iconStyle = StyleContext.getDefaultStyleContext().getStyle(StyleContext.DEFAULT_STYLE)
+        val (iconText, iconColor) = when (messageType) {
+            MessageType.USER -> ">" to JBColor.gray // Secondary color for user icon
+            MessageType.ASSISTANT -> "●" to Color.decode("#FFFFFF") // White circle
+            MessageType.ERROR -> "●" to Color.decode("#FF6B6B") // Red circle
+            else -> "●" to JBColor.foreground()
+        }
+        
+        StyleConstants.setForeground(iconStyle, iconColor)
+        StyleConstants.setBold(iconStyle, true)
+        
+        // Icon area: icon + padding to fixed width
+        val iconArea = iconText.padEnd(iconWidth)
+        doc.insertString(doc.length, iconArea, iconStyle)
+        
+        // Set text color
+        val textColor = when (messageType) {
+            MessageType.USER -> JBColor.gray // Secondary color for user messages
+            MessageType.ERROR -> Color.decode("#FF6B6B")
+            else -> JBColor.foreground()
+        }
+        
+        // Right side: plain text without markdown rendering
+        // Continuation lines use left margin + icon width for proper alignment
+        val continuationIndent = leftMargin + " ".repeat(iconWidth)
+        addPlainText(doc, text, textColor, continuationIndent)
+        
+        doc.insertString(doc.length, "\n\n", null)
+    }
+    
+    private fun addPlainText(doc: StyledDocument, text: String, color: Color, indent: String) {
+        val style = StyleContext.getDefaultStyleContext().getStyle(StyleContext.DEFAULT_STYLE)
+        StyleConstants.setForeground(style, color)
+        StyleConstants.setBold(style, false)
+        
+        val lines = text.split("\n")
+        for (i in lines.indices) {
+            val line = lines[i]
+            if (i == 0) {
+                doc.insertString(doc.length, line, style)
+            } else {
+                doc.insertString(doc.length, "\n$indent$line", style)
+            }
+        }
+    }
+    
+    
+    private fun addToolMessage(doc: StyledDocument, style: MutableAttributeSet, text: String, isError: Boolean = false) {
+        // Use same layout as messages: left margin + icon area
+        val leftMargin = "  " // 2 spaces for left margin
+        val iconWidth = 4      // 4 chars total for icon area
+        
+        // Add left margin
+        doc.insertString(doc.length, leftMargin, null)
+        
+        // Add tool icon with fixed width
+        val iconStyle = StyleContext.getDefaultStyleContext().getStyle(StyleContext.DEFAULT_STYLE)
+        val iconColor = if (isError) Color.decode("#FF6B6B") else Color.decode("#50C878") // Green or red
+        StyleConstants.setForeground(iconStyle, iconColor)
+        StyleConstants.setBold(iconStyle, true)
+        
+        // Icon area: icon + padding to fixed width
+        val iconArea = "●".padEnd(iconWidth)
+        doc.insertString(doc.length, iconArea, iconStyle)
+        
+        // Add tool text with proper indentation
+        val textColor = if (isError) Color.decode("#FF6B6B") else Color.decode("#808080")
+        val textStyle = StyleContext.getDefaultStyleContext().getStyle(StyleContext.DEFAULT_STYLE)
+        StyleConstants.setForeground(textStyle, textColor)
+        
+        val lines = text.split("\n")
+        for (i in lines.indices) {
+            val line = lines[i]
+            
+            // First line (title) should be bold
+            StyleConstants.setBold(textStyle, i == 0)
+            
+            if (i == 0) {
+                doc.insertString(doc.length, line, textStyle)
+            } else {
+                // Continuation lines with proper indentation matching icon area
+                val continuationIndent = leftMargin + " ".repeat(iconWidth)
+                doc.insertString(doc.length, "\n$continuationIndent$line", textStyle)
+            }
+        }
+        
+        doc.insertString(doc.length, "\n\n", null)
     }
     
     private fun showSessionMenu() {
