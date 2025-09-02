@@ -33,14 +33,14 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
     private val settings = ClaudeSettings.getInstance()
     
     // UI Components
-    private val chatArea: JTextPane
+    private val messagesPanel: JPanel
+    private val chatScrollPane: JScrollPane
     private val inputArea: JBTextArea // 多行输入区域
     private val currentFileLabel: JLabel // 显示当前文件和选中行（在发送栏最左侧）
     private val sendButton: JButton
     private val clearButton: JButton
     private val sessionButton: JButton
     private val modelComboBox: JComboBox<String>
-    private val scrollPane: JBScrollPane
     
     // Completion system
     private var completionPanel: JBPanel<*>
@@ -54,14 +54,15 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         layout = BorderLayout()
         
         // Initialize UI components
-        chatArea = createChatArea()
+        messagesPanel = createMessagesPanel()
+        chatScrollPane = createChatScrollPane()
         inputArea = createInputArea()
         currentFileLabel = createCurrentFileLabel()
         sendButton = createSendButton()
         clearButton = createClearButton()
         sessionButton = createSessionButton()
         modelComboBox = createModelComboBox()
-        scrollPane = createScrollPane()
+        // scrollPane is now chatScrollPane
         
         // Initialize completion components
         completionList = createCompletionList()
@@ -74,12 +75,23 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         loadInitialData()
     }
     
-    private fun createChatArea(): JTextPane {
-        return JTextPane().apply {
-            isEditable = false
+    private fun createMessagesPanel(): JPanel {
+        return JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
             background = JBColor.background()
-            contentType = "text/html"
-            font = Font(Font.MONOSPACED, Font.PLAIN, 12)
+            border = JBUI.Borders.empty(10)
+        }
+    }
+    
+    private fun createChatScrollPane(): JScrollPane {
+        return JBScrollPane(messagesPanel).apply {
+            preferredSize = Dimension(600, 400)
+            verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
+            horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
+            border = JBUI.Borders.compound(
+                JBUI.Borders.customLine(JBColor.border(), 1),
+                JBUI.Borders.empty()
+            )
         }
     }
     
@@ -145,13 +157,6 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
     }
     
     
-    private fun createScrollPane(): JBScrollPane {
-        return JBScrollPane(chatArea).apply {
-            preferredSize = Dimension(600, 400)
-            verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
-            horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
-        }
-    }
     
     private fun createCompletionList(): JList<String> {
         return JList<String>().apply {
@@ -263,7 +268,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         
         // Center section (chat + completion)
         val centerSection = JBPanel<JBPanel<*>>(BorderLayout()).apply {
-            add(scrollPane, BorderLayout.CENTER)
+            add(chatScrollPane, BorderLayout.CENTER)
             add(completionPanel, BorderLayout.SOUTH)
         }
         
@@ -503,39 +508,42 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
     
     private fun updateChatDisplay(messages: List<ClaudeStreamMessage>) {
         ApplicationManager.getApplication().invokeLater {
-            val doc = chatArea.styledDocument
-            val style = StyleContext.getDefaultStyleContext().getStyle(StyleContext.DEFAULT_STYLE)
-            
-            // Clear existing content
-            chatArea.text = ""
+            // Clear existing messages
+            messagesPanel.removeAll()
             
             try {
                 // Group messages to handle tool use/result pairs
                 val groupedMessages = groupToolMessages(messages)
                 
                 for (group in groupedMessages) {
-                    when (group.type) {
-                        "user" -> {
-                            val userText = group.content
-                            addMessageWithIcon(doc, style, userText, MessageType.USER)
-                        }
-                        "assistant" -> {
-                            addMessageWithIcon(doc, style, group.content, MessageType.ASSISTANT)
-                        }
-                        "tool_interaction" -> {
-                            // Display tool use and result together
-                            addToolInteraction(doc, style, group.toolUse, group.toolResult)
-                        }
-                        "error" -> {
-                            addMessageWithIcon(doc, style, group.content, MessageType.ERROR)
-                        }
+                    val messageComponent = when (group.type) {
+                        "user" -> createMessageComponent(">", JBColor.gray, group.content, JBColor.gray)
+                        "assistant" -> createMessageComponent("●", Color.decode("#FFFFFF"), group.content, JBColor.foreground())
+                        "tool_interaction" -> createToolInteractionComponent(group.toolUse, group.toolResult)
+                        "error" -> createMessageComponent("●", Color.decode("#FF6B6B"), group.content, Color.decode("#FF6B6B"))
+                        else -> null
+                    }
+                    
+                    messageComponent?.let {
+                        messagesPanel.add(it)
+                        messagesPanel.add(Box.createVerticalStrut(4)) // Reduced spacing between messages
                     }
                 }
                 
-                // Scroll to bottom
-                chatArea.caretPosition = doc.length
+                // Add flexible space at the bottom
+                messagesPanel.add(Box.createVerticalGlue())
                 
-            } catch (e: BadLocationException) {
+                // Refresh the display
+                messagesPanel.revalidate()
+                messagesPanel.repaint()
+                
+                // Scroll to bottom
+                SwingUtilities.invokeLater {
+                    val scrollBar = chatScrollPane.verticalScrollBar
+                    scrollBar.value = scrollBar.maximum
+                }
+                
+            } catch (e: Exception) {
                 e.printStackTrace()
             }
         }
@@ -633,62 +641,145 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         return groups
     }
     
-    private fun addToolInteraction(doc: StyledDocument, style: MutableAttributeSet, toolUse: com.claudecodechat.models.Content?, toolResult: com.claudecodechat.models.Content?) {
-        // Use same layout as messages: left margin + icon area
-        val leftMargin = "  " // 2 spaces for left margin
-        val iconWidth = 4      // 4 chars total for icon area
-        
-        // Add left margin
-        doc.insertString(doc.length, leftMargin, null)
-        
-        // Add tool icon with fixed width
-        val iconStyle = StyleContext.getDefaultStyleContext().getStyle(StyleContext.DEFAULT_STYLE)
+    /**
+     * Create a message component with icon and content in DIV-like layout
+     */
+    private fun createMessageComponent(iconText: String, iconColor: Color, content: String, textColor: Color): JPanel {
+        return JBPanel<JBPanel<*>>(BorderLayout()).apply {
+            border = JBUI.Borders.empty(2, 0, 2, 0) // Small top/bottom padding only
+            background = JBColor.background()
+            
+            // Icon area (left side) - fixed width, top aligned
+            val iconPanel = JBPanel<JBPanel<*>>(BorderLayout()).apply {
+                background = JBColor.background()
+                preferredSize = Dimension(20, -1) // Fixed width
+                
+                val iconLabel = JBLabel(iconText).apply {
+                    foreground = iconColor
+                    font = Font(Font.SANS_SERIF, Font.BOLD, 12)
+                    horizontalAlignment = SwingConstants.LEFT
+                    verticalAlignment = SwingConstants.TOP // Top align the icon
+                }
+                add(iconLabel, BorderLayout.NORTH) // Put icon at top
+            }
+            add(iconPanel, BorderLayout.WEST)
+            
+            // Content area (right side) - flexible width with text wrapping
+            val contentArea = createWrappingContentArea(content, textColor)
+            add(contentArea, BorderLayout.CENTER)
+        }
+    }
+    
+    /**
+     * Create a tool interaction component
+     */
+    private fun createToolInteractionComponent(toolUse: com.claudecodechat.models.Content?, toolResult: com.claudecodechat.models.Content?): JPanel {
         val isError = toolResult?.isError == true
-        val iconColor = if (isError) Color.decode("#FF6B6B") else Color.decode("#50C878") // Red for error, green for success
-        StyleConstants.setForeground(iconStyle, iconColor)
-        StyleConstants.setBold(iconStyle, true)
+        val iconColor = if (isError) Color.decode("#FF6B6B") else Color.decode("#50C878")
         
-        // Icon area: icon + padding to fixed width
-        val iconArea = "⏺".padEnd(iconWidth) // Record button symbol with padding
-        doc.insertString(doc.length, iconArea, iconStyle)
-        
-        // Format tool display
         val toolName = toolUse?.name ?: "Unknown"
         val inputString = toolUse?.input?.toString() ?: ""
         val formattedDisplay = formatToolDisplay(toolName, inputString, toolResult)
         
-        val textColor = JBColor.foreground() // Use normal text color, not secondary
-        val textStyle = StyleContext.getDefaultStyleContext().getStyle(StyleContext.DEFAULT_STYLE)
-        StyleConstants.setForeground(textStyle, textColor)
-        
-        val lines = formattedDisplay.split("\n")
-        for (i in lines.indices) {
-            val line = lines[i]
+        return JBPanel<JBPanel<*>>(BorderLayout()).apply {
+            border = JBUI.Borders.empty(2, 0, 2, 0) // Small top/bottom padding only
+            background = JBColor.background()
             
-            if (i == 0) {
-                // First line: tool name should be bold
-                val parts = line.split("(", limit = 2)
-                if (parts.size == 2) {
-                    // Tool name part (bold)
-                    StyleConstants.setBold(textStyle, true)
-                    doc.insertString(doc.length, parts[0], textStyle)
-                    
-                    // Parameters part (normal)
-                    StyleConstants.setBold(textStyle, false)
-                    doc.insertString(doc.length, "(${parts[1]}", textStyle)
-                } else {
-                    StyleConstants.setBold(textStyle, true)
-                    doc.insertString(doc.length, line, textStyle)
+            // Icon area (left side) - fixed width, top aligned  
+            val iconPanel = JBPanel<JBPanel<*>>(BorderLayout()).apply {
+                background = JBColor.background()
+                preferredSize = Dimension(20, -1) // Fixed width
+                
+                val iconLabel = JBLabel("⏺").apply {
+                    foreground = iconColor
+                    font = Font(Font.SANS_SERIF, Font.BOLD, 12)
+                    horizontalAlignment = SwingConstants.LEFT
+                    verticalAlignment = SwingConstants.TOP // Top align the icon
                 }
-            } else {
-                // Continuation lines with proper indentation matching icon area
-                StyleConstants.setBold(textStyle, false)
-                val continuationIndent = leftMargin + " ".repeat(iconWidth)
-                doc.insertString(doc.length, "\n$continuationIndent$line", textStyle)
+                add(iconLabel, BorderLayout.NORTH) // Put icon at top
+            }
+            add(iconPanel, BorderLayout.WEST)
+            
+            // Tool content area (right side) with wrapping
+            val contentArea = createWrappingToolContentArea(formattedDisplay, JBColor.foreground())
+            add(contentArea, BorderLayout.CENTER)
+        }
+    }
+    
+    /**
+     * Create content area for message text with automatic wrapping
+     */
+    private fun createWrappingContentArea(content: String, textColor: Color): JPanel {
+        return JBPanel<JBPanel<*>>(BorderLayout()).apply {
+            background = JBColor.background()
+            border = JBUI.Borders.empty()
+            
+            // Use JTextArea for automatic text wrapping
+            val textArea = JTextArea(content).apply {
+                foreground = textColor
+                background = JBColor.background()
+                font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
+                isEditable = false
+                isOpaque = false
+                lineWrap = true
+                wrapStyleWord = true
+                border = null
+            }
+            
+            add(textArea, BorderLayout.CENTER)
+        }
+    }
+    
+    /**
+     * Create content area for message text (legacy - kept for compatibility)
+     */
+    private fun createContentArea(content: String, textColor: Color): JPanel {
+        return createWrappingContentArea(content, textColor)
+    }
+    
+    /**
+     * Create content area for tool display with automatic wrapping
+     */
+    private fun createWrappingToolContentArea(content: String, textColor: Color): JPanel {
+        return JBPanel<JBPanel<*>>().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            background = JBColor.background()
+            border = JBUI.Borders.empty()
+            
+            val lines = content.split("\\n")
+            for ((index, line) in lines.withIndex()) {
+                if (line.isNotBlank()) {
+                    // First line (tool name) should be bold
+                    val isBold = index == 0 && !line.startsWith("⎿")
+                    val font = if (isBold) {
+                        Font(Font.SANS_SERIF, Font.BOLD, 12)
+                    } else {
+                        Font(Font.SANS_SERIF, Font.PLAIN, 12)
+                    }
+                    
+                    // Use JTextArea for each line to enable wrapping
+                    val textArea = JTextArea(line).apply {
+                        foreground = textColor
+                        background = JBColor.background()
+                        this.font = font
+                        isEditable = false
+                        isOpaque = false
+                        lineWrap = true
+                        wrapStyleWord = true
+                        border = null
+                        alignmentX = Component.LEFT_ALIGNMENT
+                    }
+                    add(textArea)
+                }
             }
         }
-        
-        doc.insertString(doc.length, "\n\n", null)
+    }
+    
+    /**
+     * Create content area for tool display (legacy - kept for compatibility)
+     */
+    private fun createToolContentArea(content: String, textColor: Color): JPanel {
+        return createWrappingToolContentArea(content, textColor)
     }
     
     private fun formatToolDisplay(toolName: String, input: String, toolResult: com.claudecodechat.models.Content?): String {
@@ -708,6 +799,30 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         }
         
         return result.joinToString("\n")
+    }
+    
+    private fun clearChat() {
+        messagesPanel.removeAll()
+        messagesPanel.revalidate()
+        messagesPanel.repaint()
+    }
+    
+    fun appendCodeToInput(code: String) {
+        val currentText = inputArea.text
+        val newText = if (currentText.isEmpty()) {
+            code
+        } else {
+            "$currentText\n\n$code"
+        }
+        inputArea.text = newText
+        inputArea.caretPosition = newText.length
+        inputArea.requestFocus()
+    }
+    
+    private fun showSessionMenu() {
+        // Show session selection menu
+        // This can be expanded later with actual session management
+        Messages.showInfoMessage(project, "Session management coming soon!", "Sessions")
     }
     
     private fun extractToolParameters(toolName: String, input: String): String {
@@ -885,37 +1000,12 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
             
             if (diffLines.isNotEmpty()) {
                 val summary = if (addedLines > 0) {
-                    "Updated CLAUDE.md with $addedLines additions"
+                    "Applied edit with $addedLines additions"
                 } else {
                     "Applied edit"
                 }
                 
-                // Return summary + key diff lines
-                val result = mutableListOf(summary)
-                
-                // Add a few key diff lines to show what was changed
-                diffLines.take(8).forEach { diffLine ->
-                    when {
-                        diffLine.contains("→") -> {
-                            // Line number - extract the actual content
-                            val match = Regex("""\s*(\d+)→(.*)$""").find(diffLine)
-                            if (match != null) {
-                                val lineContent = match.groupValues[2].trim()
-                                if (lineContent.isNotEmpty() && !lineContent.startsWith("#") && !lineContent.startsWith("`")) {
-                                    result.add("    ${match.groupValues[1]}")
-                                }
-                            }
-                        }
-                        diffLine.startsWith("+") -> {
-                            val addedContent = diffLine.substring(1).trim()
-                            if (addedContent.isNotEmpty()) {
-                                result.add("    + $addedContent")
-                            }
-                        }
-                    }
-                }
-                
-                return result.joinToString("\n")
+                return summary
             }
             
             // Fallback: check for "Applied X edit(s)" pattern
@@ -932,212 +1022,25 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         return "File edited"
     }
     
-    private fun addStyledText(doc: StyledDocument, style: MutableAttributeSet, text: String, color: Color, bold: Boolean) {
-        StyleConstants.setForeground(style, color)
-        StyleConstants.setBold(style, bold)
-        doc.insertString(doc.length, text, style)
-    }
-    
-    private fun addMessageWithIcon(doc: StyledDocument, style: MutableAttributeSet, text: String, messageType: MessageType) {
-        // Create fixed-width layout with proper left margin: margin + icon area + text area
-        val leftMargin = "  " // 2 spaces for left margin
-        val iconWidth = 4      // 4 chars total for icon area
-        
-        // Add left margin
-        doc.insertString(doc.length, leftMargin, null)
-        
-        // Add icon with fixed width
-        val iconStyle = StyleContext.getDefaultStyleContext().getStyle(StyleContext.DEFAULT_STYLE)
-        val (iconText, iconColor) = when (messageType) {
-            MessageType.USER -> ">" to JBColor.gray // Secondary color for user icon
-            MessageType.ASSISTANT -> "●" to Color.decode("#FFFFFF") // White circle
-            MessageType.ERROR -> "●" to Color.decode("#FF6B6B") // Red circle
-            else -> "●" to JBColor.foreground()
-        }
-        
-        StyleConstants.setForeground(iconStyle, iconColor)
-        StyleConstants.setBold(iconStyle, true)
-        
-        // Icon area: icon + padding to fixed width
-        val iconArea = iconText.padEnd(iconWidth)
-        doc.insertString(doc.length, iconArea, iconStyle)
-        
-        // Set text color
-        val textColor = when (messageType) {
-            MessageType.USER -> JBColor.gray // Secondary color for user messages
-            MessageType.ERROR -> Color.decode("#FF6B6B")
-            else -> JBColor.foreground()
-        }
-        
-        // Right side: plain text without markdown rendering
-        // Continuation lines use left margin + icon width for proper alignment
-        val continuationIndent = leftMargin + " ".repeat(iconWidth)
-        addPlainText(doc, text, textColor, continuationIndent)
-        
-        doc.insertString(doc.length, "\n\n", null)
-    }
-    
-    private fun addPlainText(doc: StyledDocument, text: String, color: Color, indent: String) {
-        val style = StyleContext.getDefaultStyleContext().getStyle(StyleContext.DEFAULT_STYLE)
-        StyleConstants.setForeground(style, color)
-        StyleConstants.setBold(style, false)
-        
-        val lines = text.split("\n")
-        for (i in lines.indices) {
-            val line = lines[i]
-            if (i == 0) {
-                doc.insertString(doc.length, line, style)
-            } else {
-                doc.insertString(doc.length, "\n$indent$line", style)
-            }
-        }
-    }
-    
-    
-    private fun addToolMessage(doc: StyledDocument, style: MutableAttributeSet, text: String, isError: Boolean = false) {
-        // Use same layout as messages: left margin + icon area
-        val leftMargin = "  " // 2 spaces for left margin
-        val iconWidth = 4      // 4 chars total for icon area
-        
-        // Add left margin
-        doc.insertString(doc.length, leftMargin, null)
-        
-        // Add tool icon with fixed width
-        val iconStyle = StyleContext.getDefaultStyleContext().getStyle(StyleContext.DEFAULT_STYLE)
-        val iconColor = if (isError) Color.decode("#FF6B6B") else Color.decode("#50C878") // Green or red
-        StyleConstants.setForeground(iconStyle, iconColor)
-        StyleConstants.setBold(iconStyle, true)
-        
-        // Icon area: icon + padding to fixed width
-        val iconArea = "●".padEnd(iconWidth)
-        doc.insertString(doc.length, iconArea, iconStyle)
-        
-        // Add tool text with proper indentation
-        val textColor = if (isError) Color.decode("#FF6B6B") else Color.decode("#808080")
-        val textStyle = StyleContext.getDefaultStyleContext().getStyle(StyleContext.DEFAULT_STYLE)
-        StyleConstants.setForeground(textStyle, textColor)
-        
-        val lines = text.split("\n")
-        for (i in lines.indices) {
-            val line = lines[i]
-            
-            // First line (title) should be bold
-            StyleConstants.setBold(textStyle, i == 0)
-            
-            if (i == 0) {
-                doc.insertString(doc.length, line, textStyle)
-            } else {
-                // Continuation lines with proper indentation matching icon area
-                val continuationIndent = leftMargin + " ".repeat(iconWidth)
-                doc.insertString(doc.length, "\n$continuationIndent$line", textStyle)
-            }
-        }
-        
-        doc.insertString(doc.length, "\n\n", null)
-    }
-    
-    private fun showSessionMenu() {
-        val sessions = sessionViewModel.getRecentSessionsWithDetails()
-        val menuItems = mutableListOf<String>()
-        
-        menuItems.add("🆕 New Session")
-        menuItems.add("---") // Separator
-        
-        sessions.forEach { session ->
-            menuItems.add("📝 ${session.id.take(8)}... - ${session.preview.take(50)}")
-        }
-        
-        val popup = JBPopupFactory.getInstance()
-            .createPopupChooserBuilder(menuItems)
-            .setTitle("Sessions")
-            .setItemChosenCallback { selectedItem ->
-                when {
-                    selectedItem.startsWith("🆕") -> {
-                        sessionViewModel.startNewSession()
-                    }
-                    selectedItem.startsWith("📝") -> {
-                        val sessionId = sessions.find { 
-                            selectedItem.contains(it.id.take(8)) 
-                        }?.id
-                        if (sessionId != null) {
-                            sessionViewModel.resumeSession(sessionId)
-                        }
-                    }
-                }
-            }
-            .createPopup()
-        
-        popup.showUnderneathOf(sessionButton)
-    }
-    
-    
-    private fun clearChat() {
-        val choice = Messages.showYesNoDialog(
-            project,
-            "Are you sure you want to clear the chat history?",
-            "Clear Chat History",
-            Messages.getQuestionIcon()
-        )
-        
-        if (choice == Messages.YES) {
-            sessionViewModel.clearChat()
-        }
-    }
-    
-    fun appendCodeToInput(code: String) {
-        ApplicationManager.getApplication().invokeLater {
-            val currentText = inputArea.text
-            val separator = if (currentText.isNotEmpty() && !currentText.endsWith("\n")) "\n\n" else ""
-            inputArea.text = currentText + separator + "```\n" + code + "\n```"
-            inputArea.caretPosition = inputArea.text.length
-            inputArea.requestFocusInWindow()
-        }
-    }
-    
-    fun dispose() {
-        scope.cancel()
-        hideCompletion()
-    }
-    
-    /**
-     * Custom list cell renderer for completion items with file icons
-     */
+    // Completion list cell renderer
     private inner class CompletionListCellRenderer : DefaultListCellRenderer() {
         override fun getListCellRendererComponent(
-            list: JList<*>?,
-            value: Any?,
-            index: Int,
-            isSelected: Boolean,
-            cellHasFocus: Boolean
+            list: JList<*>?, value: Any?, index: Int, isSelected: Boolean, cellHasFocus: Boolean
         ): Component {
-            super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
+            val component = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
             
-            // Get the completion item for this index
-            val state = currentCompletionState
-            if (state != null && index >= 0 && index < state.items.size) {
-                val item = state.items[index]
-                when (item) {
-                    is com.claudecodechat.completion.CompletionItem.FileReference -> {
-                        // Use IntelliJ's file icon
-                        try {
-                            val file = com.intellij.openapi.vfs.VfsUtil.findFileByIoFile(
-                                java.io.File(item.path), false
-                            )
-                            if (file != null) {
-                                val fileType = com.intellij.openapi.fileTypes.FileTypeManager
-                                    .getInstance().getFileTypeByFile(file)
-                                icon = fileType.icon
-                            }
-                        } catch (e: Exception) {
-                            // Fallback: no icon
-                            icon = null
+            // Get the actual completion item from currentCompletionState
+            currentCompletionState?.let { state ->
+                if (index >= 0 && index < state.items.size) {
+                    val item = state.items[index]
+                    text = when (item) {
+                        is com.claudecodechat.completion.CompletionItem.SlashCommand -> {
+                            "/${item.name} - ${item.description}"
                         }
-                        text = "${item.relativePath} ${if (item.fileType != null) "(${item.fileType})" else ""}"
-                    }
-                    is com.claudecodechat.completion.CompletionItem.SlashCommand -> {
-                        // No icon for slash commands
-                        icon = null
-                        text = "/${item.name} - ${item.description}"
+                        is com.claudecodechat.completion.CompletionItem.FileReference -> {
+                            "@${item.relativePath}"
+                        }
+                        else -> value.toString()
                     }
                 }
             }
