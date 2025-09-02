@@ -6,13 +6,10 @@ import org.jetbrains.intellij.platform.gradle.models.ProductRelease
 
 plugins {
     id("java")
-    id("org.jetbrains.kotlin.jvm") version "1.9.23"
+    id("org.jetbrains.kotlin.jvm") version "2.1.0"
     id("org.jetbrains.intellij.platform") version "2.2.0"
     id("org.jetbrains.changelog") version "2.2.0"
-    // Temporary: Use external Compose while testing Jewel bridge integration
-    id("org.jetbrains.compose") version "1.6.11"
-    id("org.jetbrains.kotlin.plugin.compose") version "2.0.0"
-    kotlin("plugin.serialization") version "1.9.23"
+    kotlin("plugin.serialization") version "2.1.0"
     id("io.gitlab.arturbosch.detekt") version "1.23.4"
 }
 
@@ -21,41 +18,20 @@ version = "1.0.3"
 
 repositories {
     mavenCentral()
-    google()
-    // Temporary: Keep external Compose repos while testing Jewel bridge
-    maven("https://maven.pkg.jetbrains.space/public/p/compose/dev")
-    maven("https://packages.jetbrains.team/maven/p/kmp/public/")
-    // Add Space Maven repo for Jewel
-    maven("https://maven.pkg.jetbrains.space/public/p/jewel/dev")
     
     intellijPlatform {
         defaultRepositories()
-        // Add snapshot repository for latest builds
-        snapshots()
     }
 }
 
 dependencies {
     intellijPlatform {
-        // Use IntelliJ Platform instead of specific IDE to support all JetBrains IDEs  
-        // Use stable 2025.1 release
+        // Use IntelliJ Platform with broad version support
         intellijIdeaCommunity("2025.1")
-        // instrumentationTools() is deprecated and no longer necessary
         pluginVerifier()
         zipSigner()
         testFramework(TestFrameworkType.Platform)
-        
-        // TODO: Add Jewel bundled modules when correct names are determined
-        // Current available modules need to be discovered
     }
-    
-    // External Compose dependencies with explicit Skiko runtime dependencies
-    implementation(compose.desktop.currentOs)
-    // Ensure native libraries are properly bundled in the plugin
-    runtimeOnly("org.jetbrains.skiko:skiko-awt-runtime-macos-arm64:0.8.4")
-    runtimeOnly("org.jetbrains.skiko:skiko-awt-runtime-macos-x64:0.8.4")
-    runtimeOnly("org.jetbrains.skiko:skiko-awt-runtime-linux-x64:0.8.4")
-    runtimeOnly("org.jetbrains.skiko:skiko-awt-runtime-windows-x64:0.8.4")
     
     // Kotlin Serialization for JSON parsing
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
@@ -82,40 +58,34 @@ kotlin {
     jvmToolchain(17)
 }
 
-// Temporary: Compose Desktop configuration while testing bridge integration
-compose.desktop {
-    application {
-        mainClass = "MainKt"
-    }
-}
 
 intellijPlatform {
     pluginConfiguration {
         name = "Claude Code Chat"
         description = """
-            An IntelliJ IDEA plugin for integrating Claude Code CLI with a modern Compose UI.
+            An IntelliJ IDEA plugin for integrating Claude Code CLI with environment variable configuration.
             Features include:
-            - Direct Claude Code CLI integration
-            - Real-time streaming responses
-            - Session management and recovery
-            - Hook mechanism for security
-            - Modern Jetpack Compose + Jewel UI
+            - Direct Claude Code CLI integration with custom environment variables
+            - Claude executable path configuration
+            - Settings management for CLI execution
+            - Cross-platform support (macOS, Linux, Windows)
+            - Stable Swing UI for maximum compatibility
         """.trimIndent()
         
         changeNotes = """
-            <h2>1.0.0</h2>
+            <h2>1.2.0</h2>
             <ul>
-                <li>Initial release with Compose + Jewel UI</li>
-                <li>Claude Code CLI integration</li>
-                <li>JSONL streaming support</li>
-                <li>Session management</li>
-                <li>Hook mechanism for security</li>
+                <li>Stable Swing UI for maximum compatibility across all IntelliJ versions</li>
+                <li>Environment variables configuration for Claude Code CLI</li>
+                <li>Custom Claude executable path setting</li>
+                <li>Settings management interface</li>
+                <li>Cross-platform support (macOS, Linux, Windows)</li>
             </ul>
         """.trimIndent()
         
         ideaVersion {
-            sinceBuild = "251"  // IntelliJ Platform 2025.1+ (required for Jewel bundled modules)
-            untilBuild = "999.*"  // Support all future versions
+            sinceBuild = "251"  // IntelliJ Platform 2025.1+
+            untilBuild = "999.*"  // Support all future versions including 2025.2+
         }
     }
     
@@ -142,7 +112,7 @@ intellijPlatform {
                     IntelliJPlatformType.WebStorm
                 )
                 channels = listOf(ProductRelease.Channel.RELEASE)
-                sinceBuild = "251"  // IntelliJ Platform 2025.1+ (required for Jewel bundled modules)
+                sinceBuild = "251"  // IntelliJ Platform 2025.1+
                 untilBuild = "999.*"  // Support all future versions
             }
         }
@@ -167,7 +137,7 @@ tasks {
     }
     
     patchPluginXml {
-        sinceBuild = "251"  // IntelliJ Platform 2025.1+ (required for Jewel bundled modules)
+        sinceBuild = "251"  // IntelliJ Platform 2025.1+
         untilBuild = "999.*"  // Support all future versions
         
         changeNotes = provider {

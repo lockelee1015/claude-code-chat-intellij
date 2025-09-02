@@ -5,7 +5,6 @@ import com.claudecodechat.models.Content
 import com.claudecodechat.models.ContentType
 import com.claudecodechat.models.Message
 import com.claudecodechat.models.MessageType
-import com.claudecodechat.models.SessionMetrics
 import com.intellij.openapi.diagnostic.Logger
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -16,7 +15,6 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
-import java.net.URLDecoder
 
 /**
  * Loads and parses Claude Code session history from JSONL files

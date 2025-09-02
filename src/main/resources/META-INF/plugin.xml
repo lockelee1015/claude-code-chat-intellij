@@ -37,12 +37,12 @@
     <depends>com.intellij.modules.platform</depends>
     
     <extensions defaultExtensionNs="com.intellij">
-        <!-- Tool Window -->
+        <!-- Tool Window with Swing UI -->
         <toolWindow id="Claude Chat"
                     secondary="false"
                     icon="/META-INF/pluginIcon.svg"
                     anchor="right"
-                    factoryClass="com.claudecodechat.toolWindow.ClaudeChatComposeToolWindowFactory"/>
+                    factoryClass="com.claudecodechat.toolWindow.ClaudeChatSimpleToolWindowFactory"/>
         
         <!-- Settings -->
         <applicationConfigurable
