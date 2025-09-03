@@ -13,6 +13,10 @@ import com.intellij.openapi.project.Project
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBPanel
 import com.intellij.ui.components.JBScrollPane
+import com.intellij.ui.awt.RelativePoint
+import com.intellij.openapi.ui.popup.JBPopup
+import com.intellij.openapi.ui.popup.JBPopupFactory
+import com.intellij.openapi.ui.popup.ComponentPopupBuilder
 import com.intellij.util.ui.JBUI
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
@@ -41,9 +45,9 @@ class ChatInputBar(
 
     // Completion UI
     private val completionList: JList<String> = JList()
-    private val completionScrollPane: JScrollPane = JScrollPane(completionList)
-    private val completionPanel: JBPanel<*> = JBPanel<JBPanel<*>>(BorderLayout())
+    private var completionPopup: JBPopup? = null
     private var currentCompletionState: CompletionState? = null
+    private var currentSelectedIndex: Int = 0
 
     init {
         background = JBColor.background()
@@ -55,18 +59,38 @@ class ChatInputBar(
         inputArea.font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
         inputArea.addKeyListener(object : KeyAdapter() {
             override fun keyPressed(e: KeyEvent) {
-                if (e.keyCode == KeyEvent.VK_ENTER && e.isControlDown) {
-                    sendMessage()
-                    e.consume()
-                }
-                if (e.keyCode == KeyEvent.VK_ESCAPE) {
-                    hideCompletion()
-                    e.consume()
-                }
-                if (e.keyCode == KeyEvent.VK_TAB || e.keyCode == KeyEvent.VK_ENTER) {
-                    if (completionPanel.isVisible) {
-                        applySelectedCompletion()
+                when {
+                    e.keyCode == KeyEvent.VK_ENTER && e.isControlDown -> {
+                        sendMessage()
                         e.consume()
+                    }
+                    e.keyCode == KeyEvent.VK_ESCAPE -> {
+                        hideCompletion()
+                        e.consume()
+                    }
+                    e.keyCode == KeyEvent.VK_UP || e.keyCode == KeyEvent.VK_DOWN -> {
+                
+                        if (completionPopup?.isVisible == true) {
+                            val state = currentCompletionState
+                            if (state != null && state.items.isNotEmpty()) {
+                                val currentIndex = completionList.selectedIndex
+                                val newIndex = when (e.keyCode) {
+                                    KeyEvent.VK_UP -> if (currentIndex > 0) currentIndex - 1 else state.items.size - 1
+                                    KeyEvent.VK_DOWN -> if (currentIndex < state.items.size - 1) currentIndex + 1 else 0
+                                    else -> currentIndex
+                                }
+                                completionList.selectedIndex = newIndex
+                                completionList.ensureIndexIsVisible(newIndex)
+                                currentSelectedIndex = newIndex
+                                e.consume() // Only consume when popup is visible
+                            }
+                        }
+                    }
+                    e.keyCode == KeyEvent.VK_TAB || e.keyCode == KeyEvent.VK_ENTER -> {
+                        if (completionPopup?.isVisible == true) {
+                            applySelectedCompletion()
+                            e.consume()
+                        }
                     }
                 }
             }
@@ -80,29 +104,28 @@ class ChatInputBar(
             override fun changedUpdate(e: javax.swing.event.DocumentEvent) = updateCompletion()
         })
 
-        // Completion list
+        // Completion list (minimal setup for popup)
         completionList.selectionMode = ListSelectionModel.SINGLE_SELECTION
         completionList.background = JBColor.background()
         completionList.foreground = JBColor.foreground()
         completionList.font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
+        
+        // Add keyboard support to completion list
         completionList.addKeyListener(object : KeyAdapter() {
             override fun keyPressed(e: KeyEvent) {
                 when (e.keyCode) {
-                    KeyEvent.VK_ENTER -> { applySelectedCompletion(); e.consume() }
-                    KeyEvent.VK_ESCAPE -> { hideCompletion(); inputArea.requestFocus(); e.consume() }
+                    KeyEvent.VK_ENTER, KeyEvent.VK_TAB -> {
+                        applySelectedCompletion()
+                        e.consume()
+                    }
+                    KeyEvent.VK_ESCAPE -> {
+                        hideCompletion()
+                        inputArea.requestFocus()
+                        e.consume()
+                    }
                 }
             }
         })
-        completionScrollPane.preferredSize = Dimension(600, 150)
-        completionPanel.border = JBUI.Borders.empty()
-        completionPanel.add(JLabel("Completions").apply {
-            font = Font(Font.SANS_SERIF, Font.BOLD, 11)
-            foreground = JBColor.gray
-            border = JBUI.Borders.empty(2, 5)
-        }, BorderLayout.NORTH)
-        completionPanel.add(completionScrollPane, BorderLayout.CENTER)
-        completionPanel.isVisible = false
-        completionPanel.preferredSize = Dimension(0, 0)
 
         // Layout
         val inputScroll = JBScrollPane(inputArea).apply {
@@ -128,7 +151,7 @@ class ChatInputBar(
         }
 
         add(section, BorderLayout.CENTER)
-        add(completionPanel, BorderLayout.SOUTH)
+        // Don't add completion panel to layout - it will be a popup
 
         // Actions
         sendButton.addActionListener { sendMessage() }
@@ -177,21 +200,69 @@ class ChatInputBar(
 
     private fun showCompletionPopup(state: CompletionState) {
         currentCompletionState = state
-        val items = state.items.mapIndexed { index, _ -> "Item $index" }
-        val model = DefaultListModel<String>()
-        items.forEach { model.addElement(it) }
-        completionList.model = model
-        completionList.selectedIndex = state.selectedIndex
-        completionPanel.isVisible = true
-        completionPanel.preferredSize = Dimension(completionPanel.width, 150)
-        if (state.selectedIndex >= 0) completionList.ensureIndexIsVisible(state.selectedIndex)
-        completionPanel.revalidate(); completionPanel.repaint()
+        currentSelectedIndex = state.selectedIndex
+        
+        // Close existing popup
+        completionPopup?.cancel()
+        
+
+        
+        val items = state.items.map { item ->
+            when (item) {
+                is com.claudecodechat.completion.CompletionItem.SlashCommand -> {
+                    "/${item.name} - ${item.description}"
+                }
+                is com.claudecodechat.completion.CompletionItem.FileReference -> {
+                    "${item.fileName} - ${item.relativePath}"
+                }
+            }
+        }
+        
+        // Update the JList model and selection
+        val listModel = DefaultListModel<String>()
+        items.forEach { listModel.addElement(it) }
+        completionList.model = listModel
+        completionList.selectedIndex = currentSelectedIndex
+        
+        // Create scrollable popup using ComponentPopupBuilder
+        val scrollPane = JBScrollPane(completionList).apply {
+            // Height for ~8 items (25px per item + padding)
+            preferredSize = Dimension(inputArea.width, 220)
+            verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
+            horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
+            border = JBUI.Borders.empty()
+        }
+        
+        completionPopup = JBPopupFactory.getInstance().createComponentPopupBuilder(scrollPane, completionList)
+            .setTitle("Completions")
+            .setMovable(false)
+            .setResizable(false)
+            .setRequestFocus(false)
+            .addListener(object : com.intellij.openapi.ui.popup.JBPopupListener {
+                override fun onClosed(event: com.intellij.openapi.ui.popup.LightweightWindowEvent) {
+                    completionPopup = null
+                    currentCompletionState = null
+                }
+            })
+            .createPopup()
+        
+        // Calculate popup position and size to align perfectly with input area
+        val inputBounds = inputArea.bounds
+        val inputLocationOnScreen = inputArea.locationOnScreen
+        
+        // Position popup directly above the input area with more space
+        val popupX = inputLocationOnScreen.x
+        val popupY = inputLocationOnScreen.y - 220 - 40 // 10px gap above 220px height
+        
+        completionPopup?.showInScreenCoordinates(inputArea, Point(popupX, popupY))
     }
 
     private fun applySelectedCompletion() {
         val state = currentCompletionState ?: return
-        val idx = completionList.selectedIndex
-        if (idx in 0 until state.items.size) applyCompletion(state, idx)
+        val selectedIndex = completionList.selectedIndex
+        if (selectedIndex in 0 until state.items.size) {
+            applyCompletion(state, selectedIndex)
+        }
     }
 
     private fun applyCompletion(state: CompletionState, selectedIndex: Int) {
@@ -217,9 +288,8 @@ class ChatInputBar(
     }
 
     private fun hideCompletion() {
-        completionPanel.isVisible = false
-        completionPanel.preferredSize = Dimension(0, 0)
-        completionPanel.revalidate(); completionPanel.repaint()
+        completionPopup?.cancel()
+        completionPopup = null
         currentCompletionState = null
         completionManager.hideCompletion()
     }
@@ -270,5 +340,6 @@ class ChatInputBar(
         }
     }
 }
+
 
 

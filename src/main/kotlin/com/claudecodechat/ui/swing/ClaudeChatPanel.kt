@@ -14,6 +14,8 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.ui.popup.ListPopup
+import com.intellij.openapi.ui.popup.JBPopup
+
 import com.intellij.ui.JBColor
 import com.intellij.icons.AllIcons
 import com.intellij.ui.components.*
@@ -53,9 +55,8 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
     private val chatInputBar: ChatInputBar
     
     // Completion system
-    private var completionPanel: JBPanel<*>
     private var completionList: JList<String>
-    private var completionScrollPane: JScrollPane
+    private var completionPopup: JBPopup? = null
     private var currentCompletionState: CompletionState? = null
     
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -77,8 +78,6 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         
         // Initialize completion components
         completionList = createCompletionList()
-        completionScrollPane = createCompletionScrollPane()
-        completionPanel = createCompletionPanel()
         
         setupLayout()
         setupEventHandlers()
@@ -218,34 +217,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         }
     }
     
-    private fun createCompletionScrollPane(): JScrollPane {
-        return JScrollPane(completionList).apply {
-            preferredSize = Dimension(600, 150)
-            maximumSize = Dimension(Int.MAX_VALUE, 150)
-            verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
-            horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
-            border = JBUI.Borders.compound(
-                JBUI.Borders.customLine(JBColor.border(), 1),
-                JBUI.Borders.empty()
-            )
-        }
-    }
-    
-    private fun createCompletionPanel(): JBPanel<*> {
-        return JBPanel<JBPanel<*>>(BorderLayout()).apply {
-            border = JBUI.Borders.empty()
-            add(JLabel("Completions").apply {
-                font = Font(Font.SANS_SERIF, Font.BOLD, 11)
-                foreground = JBColor.gray
-                border = JBUI.Borders.empty(2, 5)
-            }, BorderLayout.NORTH)
-            add(completionScrollPane, BorderLayout.CENTER)
-            
-            // Initially hidden
-            isVisible = false
-            preferredSize = Dimension(0, 0)
-        }
-    }
+
     
     private fun setupLayout() {
         // Top toolbar
@@ -384,7 +356,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                 e.consume()
             }
             e.keyCode == KeyEvent.VK_UP || e.keyCode == KeyEvent.VK_DOWN -> {
-                if (completionPanel.isVisible) {
+                if (completionPopup?.isVisible == true) {
                     // Navigate completion list
                     val currentIndex = completionList.selectedIndex
                     val itemCount = completionList.model.size
@@ -403,7 +375,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                 }
             }
             e.keyCode == KeyEvent.VK_TAB || e.keyCode == KeyEvent.VK_ENTER -> {
-                if (completionPanel.isVisible) {
+                if (completionPopup?.isVisible == true) {
                     // Accept completion with both TAB and ENTER
                     applySelectedCompletion()
                     e.consume()
@@ -438,8 +410,17 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         // Store current state for apply completion
         currentCompletionState = state
         
-        // Create simple string list for the model (actual display is handled by cell renderer)
-        val items = state.items.mapIndexed { index, _ -> "Item $index" }
+        // Create display strings for completion items
+        val items = state.items.map { item ->
+            when (item) {
+                is com.claudecodechat.completion.CompletionItem.SlashCommand -> {
+                    "/${item.name} - ${item.description}"
+                }
+                is com.claudecodechat.completion.CompletionItem.FileReference -> {
+                    "${item.fileName} - ${item.relativePath}"
+                }
+            }
+        }
         
         val listModel = DefaultListModel<String>()
         items.forEach { listModel.addElement(it) }
@@ -447,18 +428,40 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         completionList.model = listModel
         completionList.selectedIndex = state.selectedIndex
         
-        // Show the completion panel
-        completionPanel.isVisible = true
-        completionPanel.preferredSize = Dimension(completionPanel.width, 150)
+        // Close existing popup
+        completionPopup?.cancel()
         
-        // Ensure the selected item is visible
-        if (state.selectedIndex >= 0) {
-            completionList.ensureIndexIsVisible(state.selectedIndex)
-        }
+        // Create popup with proper sizing
+        completionPopup = JBPopupFactory.getInstance().createPopupChooserBuilder(items)
+            .setTitle("Completions")
+            .setMovable(false)
+            .setResizable(false)
+            .setRequestFocus(false)
+            .setItemChosenCallback {
+                applySelectedCompletion()
+            }
+            .addListener(object : com.intellij.openapi.ui.popup.JBPopupListener {
+                override fun onClosed(event: com.intellij.openapi.ui.popup.LightweightWindowEvent) {
+                    completionPopup = null
+                    currentCompletionState = null
+                }
+            })
+            .createPopup()
         
-        // Revalidate the layout
-        completionPanel.revalidate()
-        completionPanel.repaint()
+        // Calculate popup position and size to align perfectly with input area
+        val inputBounds = inputArea.bounds
+        val inputLocationOnScreen = inputArea.locationOnScreen
+        
+        // Set popup size to match input width with fixed height
+        val popupWidth = inputBounds.width
+        val popupHeight = 220  // Height for ~8 items
+        completionPopup?.size = Dimension(popupWidth, popupHeight)
+        
+        // Position popup directly above the input area
+        val popupX = inputLocationOnScreen.x
+        val popupY = inputLocationOnScreen.y - popupHeight - 10 // 10px gap for better spacing
+        
+        completionPopup?.showInScreenCoordinates(inputArea, Point(popupX, popupY))
     }
     
     private fun applySelectedCompletion() {
@@ -499,10 +502,8 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
     
     
     private fun hideCompletion() {
-        completionPanel.isVisible = false
-        completionPanel.preferredSize = Dimension(0, 0)
-        completionPanel.revalidate()
-        completionPanel.repaint()
+        completionPopup?.cancel()
+        completionPopup = null
         currentCompletionState = null
         completionManager.hideCompletion()
     }

@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.*
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.fileTypes.FileTypeManager
 import com.intellij.util.concurrency.NonUrgentExecutor
 
 /**
@@ -365,10 +366,31 @@ class CompletionManager(private val project: Project) {
     }
     
     /**
-     * Get icon for file type
+     * Get icon identifier for file type
      */
-    private fun getFileIcon(extension: String?): String {
-        return ""
+    private fun getFileIcon(extension: String?): String? {
+        if (extension == null) return null
+        
+        return when (extension.lowercase()) {
+            "kt" -> "kotlin"
+            "java" -> "java"
+            "js", "jsx" -> "javascript"
+            "ts", "tsx" -> "typescript"
+            "py" -> "python"
+            "md" -> "markdown"
+            "json" -> "json"
+            "xml" -> "xml"
+            "html", "htm" -> "html"
+            "css" -> "css"
+            "scss", "sass" -> "sass"
+            "yml", "yaml" -> "yaml"
+            "txt" -> "text"
+            "sql" -> "sql"
+            "sh" -> "shell"
+            "gradle" -> "gradle"
+            "properties" -> "properties"
+            else -> "file"
+        }
     }
     
     /**
