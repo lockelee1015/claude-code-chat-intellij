@@ -18,6 +18,8 @@ import com.intellij.openapi.ui.popup.JBPopup
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.ui.popup.ComponentPopupBuilder
 import com.intellij.util.ui.JBUI
+import com.intellij.icons.AllIcons
+import com.intellij.ui.AnimatedIcon
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
 import java.awt.*
@@ -31,7 +33,8 @@ import javax.swing.*
  */
 class ChatInputBar(
     private val project: Project,
-    private val onSend: (text: String, model: String) -> Unit
+    private val onSend: (text: String, model: String) -> Unit,
+    private val onStop: (() -> Unit)? = null
 ) : JBPanel<ChatInputBar>(BorderLayout()) {
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -42,6 +45,12 @@ class ChatInputBar(
     private val modelComboBox: JComboBox<String> = JComboBox(arrayOf("auto", "sonnet", "opus", "haiku"))
     private val sendButton: JButton = JButton("Send (Ctrl+Enter)")
     private val currentFileLabel: JLabel = JLabel("")
+    
+    // Loading bar components
+    private val loadingPanel: JBPanel<JBPanel<*>> = JBPanel(BorderLayout())
+    private val loadingIcon: JLabel = JLabel(AnimatedIcon.Default.INSTANCE)
+    private val loadingText: JLabel = JLabel("")
+    private val stopButton: JButton = JButton("Stop")
 
     // Completion UI
     private val completionList: JList<String> = JList()
@@ -127,6 +136,9 @@ class ChatInputBar(
             }
         })
 
+        // Setup loading panel
+        setupLoadingPanel()
+
         // Layout
         val inputScroll = JBScrollPane(inputArea).apply {
             preferredSize = Dimension(600, 100)
@@ -157,6 +169,7 @@ class ChatInputBar(
 
         val section = JBPanel<JBPanel<*>>(BorderLayout()).apply {
             border = JBUI.Borders.empty()
+            add(loadingPanel, BorderLayout.NORTH)
             add(inputScroll, BorderLayout.CENTER)
             add(controls, BorderLayout.SOUTH)
         }
@@ -180,11 +193,36 @@ class ChatInputBar(
         inputArea.text = if (current.isEmpty()) text else "$current\n\n$text"
         inputArea.caretPosition = inputArea.text.length
     }
+    
+    // Loading state management
+    fun showLoading(userPrompt: String) {
+        val summary = createPromptSummary(userPrompt)
+        loadingText.text = summary
+        loadingPanel.isVisible = true
+        sendButton.isEnabled = false
+        revalidate()
+        repaint()
+    }
+    
+    fun hideLoading() {
+        loadingPanel.isVisible = false
+        sendButton.isEnabled = true
+        revalidate()
+        repaint()
+    }
+    
+    private fun createPromptSummary(prompt: String): String {
+        return if (prompt.length <= 50) prompt else prompt.take(47) + "..."
+    }
 
     private fun sendMessage() {
         val text = inputArea.text.trim()
         if (text.isEmpty()) return
         val model = (modelComboBox.selectedItem as? String) ?: "auto"
+        
+        // Show loading state
+        showLoading(text)
+        
         inputArea.text = ""
         hideCompletion()
         onSend(text, model)
@@ -351,6 +389,43 @@ class ChatInputBar(
                 currentFileLabel.text = ""
                 currentFileLabel.isVisible = false
             }
+        }
+    }
+    
+    private fun setupLoadingPanel() {
+        // Configure loading components
+        loadingIcon.font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
+        loadingText.font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
+        loadingText.foreground = JBColor.foreground()
+        
+        stopButton.font = Font(Font.SANS_SERIF, Font.PLAIN, 11)
+        stopButton.preferredSize = Dimension(60, 24)
+        stopButton.addActionListener {
+            onStop?.invoke()
+            hideLoading()
+        }
+        
+        // Layout loading panel
+        loadingPanel.apply {
+            background = JBColor.background()
+            border = JBUI.Borders.empty(4, 8, 4, 8)
+            
+            val leftPanel = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, 5, 0)).apply {
+                background = JBColor.background()
+                add(loadingIcon)
+                add(loadingText)
+            }
+            
+            val rightPanel = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.RIGHT, 0, 0)).apply {
+                background = JBColor.background()
+                add(stopButton)
+            }
+            
+            add(leftPanel, BorderLayout.WEST)
+            add(rightPanel, BorderLayout.EAST)
+            
+            // Initially hidden
+            isVisible = false
         }
     }
 }

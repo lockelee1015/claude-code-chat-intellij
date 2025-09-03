@@ -89,10 +89,16 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
     
     
     private fun createChatInputBar(): ChatInputBar {
-        return ChatInputBar(project) { text, model ->
-            val modelToUse = if (model == "auto") "" else model
-            sessionViewModel.sendPrompt(text, modelToUse)
-        }
+        return ChatInputBar(
+            project = project,
+            onSend = { text, model ->
+                val modelToUse = if (model == "auto") "" else model
+                sessionViewModel.sendPrompt(text, modelToUse)
+            },
+            onStop = {
+                sessionViewModel.stopCurrentRequest()
+            }
+        )
     }
     
     
@@ -144,7 +150,13 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
             }
         }
         
-        // Loading state is now handled by ChatInputBar
+        scope.launch {
+            sessionViewModel.isLoading.collect { isLoading ->
+                if (!isLoading) {
+                    chatInputBar.hideLoading()
+                }
+            }
+        }
         
         // ToolWindow manages tabs now; no need to reflect current session in local tabs
         

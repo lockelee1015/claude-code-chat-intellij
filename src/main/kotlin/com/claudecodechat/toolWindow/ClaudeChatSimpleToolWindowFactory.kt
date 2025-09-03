@@ -4,6 +4,8 @@ import com.claudecodechat.ui.swing.ClaudeChatPanel
 import com.claudecodechat.state.SessionViewModel
 import com.claudecodechat.session.SessionHistoryLoader
 import com.claudecodechat.persistence.SessionPersistence
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.collect
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.project.DumbAwareAction
@@ -187,20 +189,26 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
         // Chat input at the bottom
         lateinit var welcomeContent: com.intellij.ui.content.Content
         
-        val inputBar = com.claudecodechat.ui.swing.ChatInputBar(project) { text, model ->
-            // When sending from welcome, transition into a new chat tab
-            toolWindow.contentManager.removeContent(welcomeContent, true)
-            // Use first few words of the input as title
-            val title = if (text.isNotBlank()) {
-                text.split(" ").take(2).joinToString(" ")
-            } else {
-                "New"
+        val inputBar = com.claudecodechat.ui.swing.ChatInputBar(
+            project = project,
+            onSend = { text, model ->
+                // When sending from welcome, transition into a new chat tab
+                toolWindow.contentManager.removeContent(welcomeContent, true)
+                // Use first few words of the input as title
+                val title = if (text.isNotBlank()) {
+                    text.split(" ").take(2).joinToString(" ")
+                } else {
+                    "New"
+                }
+                val chat = addChatContent(project, toolWindow, title = title, sessionId = null)
+                if (text.isNotBlank()) {
+                    chat.appendCodeToInput(text)
+                }
+            },
+            onStop = {
+                com.claudecodechat.state.SessionViewModel.getInstance(project).stopCurrentRequest()
             }
-            val chat = addChatContent(project, toolWindow, title = title, sessionId = null)
-            if (text.isNotBlank()) {
-                chat.appendCodeToInput(text)
-            }
-        }
+        )
         val inputPanel = JPanel(java.awt.BorderLayout()).apply {
             border = com.intellij.util.ui.JBUI.Borders.empty(0, 10, 0, 10)
             add(inputBar, java.awt.BorderLayout.CENTER)
@@ -213,6 +221,16 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
         welcomeContent.isCloseable = true
         toolWindow.contentManager.addContent(welcomeContent)
         toolWindow.contentManager.setSelectedContent(welcomeContent)
+        
+        // Observe loading state for the welcome input bar
+        val sessionViewModel = SessionViewModel.getInstance(project)
+        CoroutineScope(Dispatchers.Main + SupervisorJob()).launch {
+            sessionViewModel.isLoading.collect { isLoading ->
+                if (!isLoading) {
+                    inputBar.hideLoading()
+                }
+            }
+        }
     }
 
     private fun showHistoryPopup(project: Project, toolWindow: ToolWindow, anchor: Component) {
