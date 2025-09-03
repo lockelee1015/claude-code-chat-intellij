@@ -22,6 +22,7 @@ import com.intellij.ui.JBIntSpinner
 import com.intellij.ui.scale.JBUIScale
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
+import kotlinx.serialization.json.*
 import java.awt.*
 import java.awt.event.*
 import javax.swing.*
@@ -32,7 +33,7 @@ import com.claudecodechat.ui.markdown.MarkdownRenderConfig
 
 class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>() {
     private val sessionViewModel = SessionViewModel.getInstance(project)
-
+    
     // UI Components
     private val messagesPanel: JPanel
     private val chatScrollPane: JScrollPane
@@ -74,27 +75,27 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
             border = JBUI.Borders.empty()
         }
     }
-
+    
     private fun createSessionTabs(): JBTabbedPane {
         val tabs = JBTabbedPane()
         tabs.font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
         // No-op: tabs replaced by toolwindow tabs. Keep method for compatibility if needed.
         return tabs
     }
-
+    
     private fun createChatInputBar(): ChatInputBar {
         return ChatInputBar(
             project = project,
             onSend = { text, model ->
-                val modelToUse = if (model == "auto") "" else model
-                sessionViewModel.sendPrompt(text, modelToUse)
+            val modelToUse = if (model == "auto") "" else model
+            sessionViewModel.sendPrompt(text, modelToUse)
             },
             onStop = {
                 sessionViewModel.stopCurrentRequest()
             }
         )
     }
-
+    
     private fun setupLayout() {
         // Top toolbar
         val toolbarPanel = JBPanel<JBPanel<*>>(BorderLayout()).apply {
@@ -151,7 +152,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
     private fun loadInitialData() {
         // Load any initial data if needed
     }
-
+    
     private fun updateChatDisplay(messages: List<ClaudeStreamMessage>) {
         ApplicationManager.getApplication().invokeLater {
             // Clear existing messages
@@ -165,7 +166,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                     val messageComponent = when (group.type) {
                         "user" -> createMessageComponent(">", secondaryTextColor(), group.content, secondaryTextColor())
                         "assistant" -> createMessageComponent("●", JBColor.foreground(), group.content, JBColor.foreground())
-                        "tool_interaction" -> createToolInteractionComponent(group.toolUse, group.toolResult)
+                        "tool_interaction" -> createToolCard(group.toolUse, group.toolResult)
                         "error" -> createMessageComponent("●", Color.decode("#FF6B6B"), group.content, Color.decode("#FF6B6B"))
                         else -> null
                     }
@@ -308,7 +309,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                 
                 val iconLabel = JBLabel(iconText).apply {
                     foreground = iconColor
-                    font = Font(Font.SANS_SERIF, Font.BOLD, 12)  // 调整为12号字体
+                    font = Font(Font.MONOSPACED, Font.BOLD, 12)  // 调整为12号字体
                     horizontalAlignment = SwingConstants.LEFT
                     verticalAlignment = SwingConstants.TOP
                 }
@@ -334,6 +335,504 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
             if (c != null) return c
         }
         return JBColor.GRAY
+    }
+    
+    /**
+     * Create a modern tool card based on tool type
+     */
+    private fun createToolCard(toolUse: com.claudecodechat.models.Content?, toolResult: com.claudecodechat.models.Content?): JPanel {
+        if (toolUse == null) return JPanel()
+        
+        val toolName = toolUse.name ?: ""
+        val toolInput = toolUse.input?.toString() ?: ""
+        val toolOutput = toolResult?.content ?: toolResult?.text ?: ""
+        val hasError = toolResult?.isError == true
+        
+        return when (toolName.lowercase()) {
+            "edit", "multiedit" -> createDiffCard(toolName, toolInput, toolOutput, hasError)
+            "read" -> createEditorCard(toolName, toolInput, toolOutput, hasError)
+            "bash" -> createShellCard(toolName, toolInput, toolOutput, hasError)
+            "write" -> createWriteCard(toolName, toolInput, toolOutput, hasError)
+            "todowrite" -> createTodoCard(toolName, toolUse, toolOutput, hasError)
+            "grep", "glob" -> createSearchCard(toolName, toolInput, toolOutput, hasError)
+            else -> createGenericCard(toolName, toolInput, toolOutput, hasError)
+        }
+    }
+    
+    /**
+     * Create base tool card with consistent styling and status colors
+     */
+    private fun createBaseCard(title: String, hasError: Boolean = false, isInProgress: Boolean = false): JPanel {
+        return JBPanel<JBPanel<*>>(BorderLayout()).apply {
+            border = createToolCardBorder()
+            background = JBColor.background()
+            maximumSize = Dimension(Int.MAX_VALUE, 300) // Limit height
+            
+            // Header with status color background
+            val header = JBPanel<JBPanel<*>>(BorderLayout()).apply {
+                background = when {
+                    hasError -> Color(255, 235, 235, 180)     // 浅红色透明
+                    isInProgress -> Color(235, 245, 255, 180) // 浅蓝色透明
+                    else -> Color(235, 255, 235, 180)         // 浅绿色透明
+                }
+                border = JBUI.Borders.empty(8, 12)
+                
+                val titleLabel = JBLabel(title).apply {
+                    foreground = JBColor.foreground()
+                    font = Font(Font.MONOSPACED, Font.BOLD, 12)
+                }
+                
+                add(titleLabel, BorderLayout.WEST)
+            }
+            
+            add(header, BorderLayout.NORTH)
+        }
+    }
+    
+    /**
+     * Create rounded border for tool cards
+     */
+    private fun createToolCardBorder(): javax.swing.border.Border {
+        return object : javax.swing.border.AbstractBorder() {
+            override fun paintBorder(c: Component, g: Graphics, x: Int, y: Int, width: Int, height: Int) {
+                val g2 = g.create() as Graphics2D
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                g2.color = JBColor.namedColor("Component.borderColor", JBColor.border())
+                g2.stroke = BasicStroke(1.0f)
+                
+                g2.drawRoundRect(x, y, width - 1, height - 1, 8, 8)
+                g2.dispose()
+            }
+            
+            override fun getBorderInsets(c: Component): Insets {
+                return Insets(1, 1, 1, 1)
+            }
+        }
+    }
+
+    /**
+     * Create diff card for file edits
+     */
+    private fun createDiffCard(toolName: String, toolInput: String, toolOutput: String, hasError: Boolean): JPanel {
+        val filePath = extractToolParameters(toolName, toolInput)
+        val title = if (filePath.isNotEmpty()) "$toolName($filePath)" else toolName
+        
+        val card = createBaseCard(title, hasError, false)
+        
+        if (hasError) {
+            val errorContent = JTextArea(toolOutput).apply {
+                foreground = Color(220, 38, 38)
+                background = JBColor.background()
+                font = Font(Font.MONOSPACED, Font.PLAIN, 11)
+                isEditable = false
+                lineWrap = true
+                wrapStyleWord = true
+                border = JBUI.Borders.empty(8)
+            }
+            card.add(JBScrollPane(errorContent).apply {
+                preferredSize = Dimension(-1, 120)
+                border = JBUI.Borders.empty()
+            }, BorderLayout.CENTER)
+        } else {
+            val diffContent = JTextArea("File modified successfully").apply {
+                foreground = Color(34, 197, 94)
+                background = JBColor.background()
+                font = Font(Font.MONOSPACED, Font.PLAIN, 11)
+                isEditable = false
+                border = JBUI.Borders.empty(8)
+            }
+            card.add(diffContent, BorderLayout.CENTER)
+        }
+        
+        return card
+    }
+    
+    /**
+     * Create editor card for file reading
+     */
+    private fun createEditorCard(toolName: String, toolInput: String, toolOutput: String, hasError: Boolean): JPanel {
+        val filePath = extractToolParameters(toolName, toolInput)
+        val title = if (filePath.isNotEmpty()) "$toolName($filePath)" else toolName
+        
+        val card = createBaseCard(title, hasError, false)
+        
+        if (hasError) {
+            val errorContent = JTextArea(toolOutput).apply {
+                foreground = Color(220, 38, 38)
+                background = JBColor.background()
+                font = Font(Font.MONOSPACED, Font.PLAIN, 11)
+                isEditable = false
+                lineWrap = true
+                wrapStyleWord = true
+                border = JBUI.Borders.empty(8)
+            }
+            card.add(JBScrollPane(errorContent).apply {
+                preferredSize = Dimension(-1, 120)
+                border = JBUI.Borders.empty()
+            }, BorderLayout.CENTER)
+        } else {
+            val lines = toolOutput.split("\n")
+            val previewLines = lines.take(8).joinToString("\n")
+            val displayText = if (lines.size > 8) {
+                "$previewLines\n... +${lines.size - 8} more lines"
+            } else {
+                previewLines
+            }
+            
+            val editorContent = JTextArea(displayText).apply {
+                foreground = JBColor.foreground()
+                background = JBColor.background()
+                font = Font(Font.MONOSPACED, Font.PLAIN, 11)
+                isEditable = false
+                lineWrap = false
+                border = JBUI.Borders.empty(8)
+            }
+            
+            card.add(JBScrollPane(editorContent).apply {
+                preferredSize = Dimension(-1, 200)
+                border = JBUI.Borders.empty()
+            }, BorderLayout.CENTER)
+        }
+        
+        return card
+    }
+    
+    /**
+     * Create shell card for bash execution
+     */
+    private fun createShellCard(toolName: String, toolInput: String, toolOutput: String, hasError: Boolean): JPanel {
+        val command = extractToolParameters(toolName, toolInput)
+        val title = if (command.isNotEmpty()) "$toolName($command)" else toolName
+        
+        val card = createBaseCard(title, hasError, false)
+        
+        val textColor = if (hasError) Color(220, 38, 38) else JBColor.foreground()
+        val bgColor = JBColor.background()
+        
+        val shellContent = JTextArea("$ $command\n$toolOutput").apply {
+            foreground = textColor
+            background = bgColor
+            font = Font(Font.MONOSPACED, Font.PLAIN, 11)
+            isEditable = false
+            lineWrap = false
+            border = JBUI.Borders.empty(8)
+        }
+        
+        card.add(JBScrollPane(shellContent).apply {
+            preferredSize = Dimension(-1, 150)
+            border = JBUI.Borders.empty()
+        }, BorderLayout.CENTER)
+        
+        return card
+    }
+    
+    /**
+     * Create write card for file writing
+     */
+    private fun createWriteCard(toolName: String, toolInput: String, toolOutput: String, hasError: Boolean): JPanel {
+        val filePath = extractToolParameters(toolName, toolInput)
+        val title = if (filePath.isNotEmpty()) "$toolName($filePath)" else toolName
+        
+        val card = createBaseCard(title, hasError, false)
+        
+        val statusText = if (hasError) {
+            toolOutput
+        } else {
+            "File written successfully"
+        }
+        
+        val statusContent = JBLabel(statusText).apply {
+            foreground = if (hasError) Color(220, 38, 38) else Color(34, 197, 94)
+            font = Font(Font.MONOSPACED, Font.PLAIN, 11)
+            border = JBUI.Borders.empty(8)
+        }
+        
+        card.add(statusContent, BorderLayout.CENTER)
+        return card
+    }
+    
+    /**
+     * Create todo card for todo_write tool
+     */
+    private fun createTodoCard(toolName: String, toolUse: com.claudecodechat.models.Content?, toolOutput: String, hasError: Boolean): JPanel {
+        val card = createBaseCard("TodoWrite", hasError, false)
+        
+        if (hasError) {
+            val errorContent = JTextArea(toolOutput).apply {
+                foreground = Color(220, 38, 38)
+                background = JBColor.background()
+                font = Font(Font.MONOSPACED, Font.PLAIN, 11)
+                isEditable = false
+                lineWrap = true
+                wrapStyleWord = true
+                border = JBUI.Borders.empty(8)
+            }
+            card.add(JBScrollPane(errorContent).apply {
+                preferredSize = Dimension(-1, 120)
+                border = JBUI.Borders.empty()
+            }, BorderLayout.CENTER)
+        } else {
+            // Create todo list using Swing components - no scrolling
+            val todoPanel = createTodoListPanel(toolUse?.input)
+            card.add(todoPanel, BorderLayout.CENTER)
+        }
+        
+        return card
+    }
+    
+    /**
+     * Create todo list panel using Swing components with JetBrains icons
+     */
+    private fun createTodoListPanel(input: JsonElement?): JPanel {
+        val panel = JBPanel<JBPanel<*>>().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            background = JBColor.background()
+            border = JBUI.Borders.empty(8)
+        }
+        
+        // Add header
+        val headerLabel = JBLabel("Todos have been modified successfully.").apply {
+            foreground = JBColor.foreground()
+            font = Font(Font.MONOSPACED, Font.PLAIN, 11)
+            alignmentX = Component.LEFT_ALIGNMENT
+        }
+        panel.add(headerLabel)
+        panel.add(Box.createVerticalStrut(8))
+        
+        try {
+            if (input is JsonObject) {
+                val todosArray = input["todos"] as? JsonArray
+                if (todosArray != null) {
+                    for (todoElement in todosArray) {
+                        if (todoElement is JsonObject) {
+                            val content = todoElement["content"]?.jsonPrimitive?.content ?: ""
+                            val status = todoElement["status"]?.jsonPrimitive?.content ?: "pending"
+                            
+                            if (content.isNotEmpty()) {
+                                println("DEBUG: Adding todo item: $content (status: $status)")
+                                val todoItem = createTodoItemComponent(content, status)
+                                todoItem.maximumSize = Dimension(Int.MAX_VALUE, todoItem.preferredSize.height)
+                                panel.add(todoItem)
+                                panel.add(Box.createVerticalStrut(4))
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            // Fallback: show simple message
+            val errorLabel = JBLabel("Failed to parse todo items: ${e.message}").apply {
+                foreground = Color(220, 38, 38)
+                font = Font(Font.MONOSPACED, Font.PLAIN, 11)
+                alignmentX = Component.LEFT_ALIGNMENT
+            }
+            panel.add(errorLabel)
+            e.printStackTrace()
+        }
+        
+        // Add a test item to make sure panel is working
+        val testItem = JBLabel("Total todos processed: ${panel.componentCount}").apply {
+            foreground = Color(100, 100, 100)
+            font = Font(Font.MONOSPACED, Font.ITALIC, 10)
+            alignmentX = Component.LEFT_ALIGNMENT
+        }
+        panel.add(testItem)
+        
+        return panel
+    }
+    
+    /**
+     * Create individual todo item component with icon and text
+     */
+    private fun createTodoItemComponent(content: String, status: String): JPanel {
+        val itemPanel = JBPanel<JBPanel<*>>(BorderLayout()).apply {
+            background = JBColor.background()
+            alignmentX = Component.LEFT_ALIGNMENT
+        }
+        
+        // Get appropriate icon based on status
+        val icon = when (status) {
+            "completed" -> AllIcons.Actions.Checked
+            "in_progress" -> AllIcons.Process.Step_passive  
+            "cancelled" -> AllIcons.Actions.Cancel
+            else -> AllIcons.General.TodoDefault
+        }
+        
+        val iconLabel = JBLabel(icon).apply {
+            border = JBUI.Borders.empty(0, 0, 0, 8)
+            verticalAlignment = SwingConstants.TOP
+        }
+        
+        val contentLabel = JBLabel(content).apply {
+            foreground = JBColor.foreground()
+            font = Font(Font.MONOSPACED, Font.PLAIN, 11)
+            verticalAlignment = SwingConstants.TOP
+        }
+        
+        itemPanel.add(iconLabel, BorderLayout.WEST)
+        itemPanel.add(contentLabel, BorderLayout.CENTER)
+        
+        return itemPanel
+    }
+
+    /**
+     * Parse todo content from JsonElement input
+     */
+    private fun parseTodoContentFromInput(input: JsonElement?): String {
+        try {
+            if (input is JsonObject) {
+                val todosArray = input["todos"] as? JsonArray
+                if (todosArray != null) {
+                    val todoItems = mutableListOf<String>()
+                    
+                    for (todoElement in todosArray) {
+                        if (todoElement is JsonObject) {
+                            val content = todoElement["content"]?.jsonPrimitive?.content ?: ""
+                            val status = todoElement["status"]?.jsonPrimitive?.content ?: "pending"
+                            
+                            val statusIcon = when (status) {
+                                "completed" -> "☑ "
+                                "in_progress" -> "⟳ "
+                                "cancelled" -> "✗ "
+                                else -> "○ "
+                            }
+                            
+                            if (content.isNotEmpty()) {
+                                todoItems.add("$statusIcon$content")
+                            }
+                        }
+                    }
+                    
+                    return if (todoItems.isNotEmpty()) {
+                        "Todos have been modified successfully.\n\n" + todoItems.joinToString("\n")
+                    } else {
+                        "Todos have been modified successfully."
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            // Fallback to simple output
+        }
+        
+        return "Todos have been modified successfully."
+    }
+
+    /**
+     * Parse todo content from JSON input (legacy method)
+     */
+    private fun parseTodoContent(toolInput: String): String {
+        try {
+            // Extract todos array from JSON
+            val todosMatch = Regex(""""todos"\s*:\s*\[(.*?)\]""", RegexOption.DOT_MATCHES_ALL).find(toolInput)
+            if (todosMatch != null) {
+                val todosJson = todosMatch.groupValues[1]
+                val todoItems = mutableListOf<String>()
+                
+                // Extract individual todo items
+                val todoPattern = Regex("""\{[^}]*"content"\s*:\s*"([^"]*)"[^}]*"status"\s*:\s*"([^"]*)"[^}]*\}""")
+                todoPattern.findAll(todosJson).forEach { match ->
+                    val content = match.groupValues[1]
+                    val status = match.groupValues[2]
+                    val statusIcon = when (status) {
+                        "completed" -> "☑ "
+                        "in_progress" -> "⟳ "
+                        "cancelled" -> "✗ "
+                        else -> "○ "
+                    }
+                    todoItems.add("$statusIcon $content")
+                }
+                
+                return if (todoItems.isNotEmpty()) {
+                    "Todos have been modified successfully.\n\n" + todoItems.joinToString("\n")
+                } else {
+                    "Todos have been modified successfully."
+                }
+            }
+        } catch (e: Exception) {
+            // Fallback to simple output
+        }
+        
+        return "Todos have been modified successfully."
+    }
+
+    /**
+     * Create search card for grep/glob results
+     */
+    private fun createSearchCard(toolName: String, toolInput: String, toolOutput: String, hasError: Boolean): JPanel {
+        val pattern = extractToolParameters(toolName, toolInput)
+        val title = if (pattern.isNotEmpty()) "$toolName($pattern)" else toolName
+        
+        val card = createBaseCard(title, hasError, false)
+        
+        if (hasError) {
+            val errorContent = JTextArea(toolOutput).apply {
+                foreground = Color(220, 38, 38)
+                background = JBColor.background()
+                font = Font(Font.MONOSPACED, Font.PLAIN, 11)
+                isEditable = false
+                lineWrap = true
+                wrapStyleWord = true
+                border = JBUI.Borders.empty(8)
+            }
+            card.add(JBScrollPane(errorContent).apply {
+                preferredSize = Dimension(-1, 120)
+                border = JBUI.Borders.empty()
+            }, BorderLayout.CENTER)
+        } else {
+            val lines = toolOutput.split("\n")
+            val resultLines = lines.take(10)
+            val displayText = if (lines.size > 10) {
+                "${resultLines.joinToString("\n")}\n... +${lines.size - 10} more results"
+            } else {
+                resultLines.joinToString("\n")
+            }
+            
+            val searchContent = JTextArea(displayText).apply {
+                foreground = JBColor.foreground()
+                background = JBColor.background()
+                font = Font(Font.MONOSPACED, Font.PLAIN, 11)
+                isEditable = false
+                lineWrap = false
+                border = JBUI.Borders.empty(8)
+            }
+            
+            card.add(JBScrollPane(searchContent).apply {
+                preferredSize = Dimension(-1, 180)
+                border = JBUI.Borders.empty()
+            }, BorderLayout.CENTER)
+        }
+        
+        return card
+    }
+    
+    /**
+     * Create generic card for other tools
+     */
+    private fun createGenericCard(toolName: String, toolInput: String, toolOutput: String, hasError: Boolean): JPanel {
+        val params = extractToolParameters(toolName, toolInput)
+        val title = if (params.isNotEmpty()) "$toolName($params)" else toolName
+        
+        val card = createBaseCard(title, hasError, false)
+        
+        val content = if (toolOutput.isNotEmpty()) toolOutput else "Tool executed"
+        val displayText = if (content.length > 200) {
+            content.take(197) + "..."
+        } else {
+            content
+        }
+        
+        val genericContent = JTextArea(displayText).apply {
+            foreground = if (hasError) Color(220, 38, 38) else JBColor.foreground()
+            background = JBColor.background()
+            font = Font(Font.MONOSPACED, Font.PLAIN, 11)
+            isEditable = false
+            lineWrap = true
+            wrapStyleWord = true
+            border = JBUI.Borders.empty(8)
+        }
+        
+        card.add(genericContent, BorderLayout.CENTER)
+        return card
     }
     
     /**
@@ -465,19 +964,19 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                         val textComponent = createExpandableTextComponent(line, textColor, font, content)
                         add(textComponent)
                     } else {
-                        // Use JTextArea for each line to enable wrapping
-                        val textArea = JTextArea(line).apply {
-                            foreground = textColor
-                            background = JBColor.background()
-                            this.font = font
-                            isEditable = false
-                            isOpaque = false
-                            lineWrap = true
-                            wrapStyleWord = true
-                            border = null
+                    // Use JTextArea for each line to enable wrapping
+                    val textArea = JTextArea(line).apply {
+                        foreground = textColor
+                        background = JBColor.background()
+                        this.font = font
+                        isEditable = false
+                        isOpaque = false
+                        lineWrap = true
+                        wrapStyleWord = true
+                        border = null
                             alignmentX = LEFT_ALIGNMENT
-                        }
-                        add(textArea)
+                    }
+                    add(textArea)
                     }
                 }
             }
@@ -663,7 +1162,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                 if (line.contains("(show more)")) {
                     val textComponent = createExpandableTextComponentForTool(line, textColor, font, toolName, originalContent)
                     container.add(textComponent)
-                } else {
+                        } else {
                     val textArea = JTextArea(line).apply {
                         foreground = textColor
                         background = JBColor.background()
@@ -785,7 +1284,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
             sessionViewModel.startNewSession()
         }
     }
-
+    
     private fun extractToolParameters(toolName: String, input: String): String {
         if (input.isEmpty()) return ""
         
