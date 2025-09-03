@@ -9,6 +9,7 @@ object ToolRendererFactory {
         TodoWriteRenderer(),
         BashRenderer(),
         ReadRenderer(),
+        EditRenderer(),
         // Add more specific renderers here
         GenericRenderer() // Always keep generic as last fallback
     )
@@ -36,6 +37,9 @@ object ToolRendererFactory {
         // Use friendly display name for tool title
         val displayName = when (toolName.lowercase()) {
             "todowrite" -> "Todo"
+            "search_replace" -> "Edit"
+            "multiedit" -> "MultiEdit"
+            "write" -> "Write"
             else -> toolName
         }
         

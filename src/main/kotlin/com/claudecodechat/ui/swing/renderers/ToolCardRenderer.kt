@@ -1,5 +1,8 @@
 package com.claudecodechat.ui.swing.renderers
 
+import com.intellij.diff.DiffContentFactory
+import com.intellij.diff.DiffManager
+import com.intellij.diff.requests.SimpleDiffRequest
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.vfs.VirtualFileManager
@@ -40,11 +43,12 @@ class ToolCardRenderer {
             maximumSize = Dimension(Int.MAX_VALUE, 300) // Limit height
             
             // Create title bar (with special handling for Read tool)
-            val titleBar = if (toolName.lowercase() == "read") {
-                createClickableTitleBar(toolName, renderer.extractDisplayParameters(toolInput), status, toolInput)
-            } else {
-                createTitleBar(toolName, renderer.extractDisplayParameters(toolInput), status)
-            }
+                    val titleBar = if (toolName.lowercase() == "read" || 
+                              toolName.lowercase() in listOf("edit", "multiedit", "write")) {
+            createClickableTitleBar(toolName, renderer.extractDisplayParameters(toolInput), status, toolInput)
+        } else {
+            createTitleBar(toolName, renderer.extractDisplayParameters(toolInput), status)
+        }
             add(titleBar, BorderLayout.NORTH)
             
             // Create content panel using specific renderer
@@ -72,7 +76,7 @@ class ToolCardRenderer {
     }
     
     /**
-     * Create clickable title bar for Read tool
+     * Create clickable title bar for Read and Edit tools
      */
     private fun createClickableTitleBar(toolName: String, filePath: String, status: ToolStatus, toolInput: JsonElement?): JPanel {
         return JBPanel<JBPanel<*>>(BorderLayout()).apply {
@@ -94,13 +98,14 @@ class ToolCardRenderer {
                 
                 // File name (clickable)
                 val fileLabel = JBLabel(fileName).apply {
-                    foreground = Color(0x6aa9ff) // 蓝色表示可点击
+                    foreground = JBColor.namedColor("Link.activeForeground", JBColor(0x589df6, 0x548af7)) // IntelliJ 默认链接颜色
                     font = Font(Font.MONOSPACED, Font.BOLD, 12)
                     cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
                     
                     addMouseListener(object : MouseAdapter() {
                         override fun mouseClicked(e: MouseEvent) {
-                            openFileInEditor(filePath)
+                            val fullPath = getFullFilePath(toolInput)
+                            openFileInEditor(fullPath)
                         }
                     })
                 }
@@ -115,7 +120,52 @@ class ToolCardRenderer {
             }
             
             add(titlePanel, BorderLayout.WEST)
+            
+            // Add Show Diff link for Edit tools
+            if (toolName.lowercase() in listOf("edit", "multiedit", "write")) {
+                val diffLink = JBLabel("Show Diff").apply {
+                    foreground = JBColor.namedColor("Link.activeForeground", JBColor(0x589df6, 0x548af7)) // IntelliJ 默认链接颜色
+                    font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
+                    cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                    border = JBUI.Borders.empty(0, 8)
+                    
+                    addMouseListener(object : MouseAdapter() {
+                        override fun mouseClicked(e: MouseEvent) {
+                            showFullDiffForEdit(toolInput)
+                        }
+                        
+                        override fun mouseEntered(e: MouseEvent) {
+                            foreground = JBColor.namedColor("Link.hoverForeground", JBColor(0x4a90e2, 0x6ba7f5))
+                        }
+                        
+                        override fun mouseExited(e: MouseEvent) {
+                            foreground = JBColor.namedColor("Link.activeForeground", JBColor(0x589df6, 0x548af7))
+                        }
+                    })
+                }
+                add(diffLink, BorderLayout.EAST)
+            }
         }
+    }
+    
+    /**
+     * Get full file path from tool input
+     */
+    private fun getFullFilePath(toolInput: JsonElement?): String {
+        try {
+            if (toolInput is JsonObject) {
+                // For Read tool
+                val targetFile = toolInput["target_file"]?.jsonPrimitive?.content
+                if (!targetFile.isNullOrEmpty()) return targetFile
+                
+                // For Edit tools
+                val filePath = toolInput["file_path"]?.jsonPrimitive?.content
+                if (!filePath.isNullOrEmpty()) return filePath
+            }
+        } catch (e: Exception) {
+            // Ignore parsing errors
+        }
+        return ""
     }
     
     /**
@@ -167,6 +217,37 @@ class ToolCardRenderer {
             override fun getBorderInsets(c: Component): Insets {
                 return Insets(1, 1, 1, 1)
             }
+        }
+    }
+    
+    /**
+     * Show full diff for Edit tools
+     */
+    private fun showFullDiffForEdit(toolInput: JsonElement?) {
+        val project = ProjectManager.getInstance().openProjects.firstOrNull() ?: return
+        
+        try {
+            if (toolInput is JsonObject) {
+                val oldString = toolInput["old_string"]?.jsonPrimitive?.content ?: ""
+                val newString = toolInput["new_string"]?.jsonPrimitive?.content ?: ""
+                val filePath = toolInput["file_path"]?.jsonPrimitive?.content ?: ""
+                
+                if (oldString.isNotEmpty() && newString.isNotEmpty()) {
+                    val fileName = if (filePath.isNotEmpty()) filePath.substringAfterLast("/") else "File"
+                    
+                    val diffRequest = SimpleDiffRequest(
+                        "Edit Changes: $fileName",
+                        DiffContentFactory.getInstance().create(oldString),
+                        DiffContentFactory.getInstance().create(newString),
+                        "Before",
+                        "After"
+                    )
+                    
+                    DiffManager.getInstance().showDiff(project, diffRequest)
+                }
+            }
+        } catch (e: Exception) {
+            // Ignore errors in diff display
         }
     }
 }
