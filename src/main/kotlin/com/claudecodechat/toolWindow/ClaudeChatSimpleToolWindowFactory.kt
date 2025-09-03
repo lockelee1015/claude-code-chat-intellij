@@ -23,6 +23,8 @@ import java.awt.Component
 import java.awt.BorderLayout
 import java.awt.FlowLayout
 import java.awt.Dimension
+import java.awt.Font
+import java.awt.Point
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 
@@ -170,46 +172,177 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
     }
 
     private fun showHistoryPopup(project: Project, toolWindow: ToolWindow, anchor: Component) {
-        val items = mutableListOf<Pair<String, String>>()
         val basePath = project.basePath
-        if (basePath != null) {
+        val sessions = if (basePath != null) {
             try {
-                val recent = SessionHistoryLoader().getRecentSessionsWithDetails(basePath, 15)
+                SessionHistoryLoader().getRecentSessionsWithDetails(basePath, 15)
                     .sortedByDescending { it.lastModified }
-                recent.forEach { s ->
-                    val preview = s.preview?.replace('\n', ' ')
-                    val label = if (!preview.isNullOrBlank()) "${s.id.take(8)}  ·  ${preview.take(60)}" else s.id.take(8)
-                    items.add(label to s.id)
-                }
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+                emptyList()
+            }
+        } else {
+            emptyList()
         }
         
-        if (items.isEmpty()) {
-            // Show a simple message if no history available
+        if (sessions.isEmpty()) {
             val popup = JBPopupFactory.getInstance()
                 .createMessage("No session history available")
             popup.showUnderneathOf(anchor)
             return
         }
 
-        val list = JList(items.map { it.first }.toTypedArray())
-        val popup = JBPopupFactory.getInstance().createListPopupBuilder(list)
+        // Create custom list with detailed layout
+        val listModel = DefaultListModel<SessionHistoryLoader.SessionInfo>()
+        sessions.forEach { listModel.addElement(it) }
+        
+        val list = JList(listModel).apply {
+            cellRenderer = SessionHistoryRenderer()
+            selectionMode = ListSelectionModel.SINGLE_SELECTION
+            visibleRowCount = Math.min(sessions.size, 8) // Max 8 visible rows
+        }
+        
+        val scrollPane = JScrollPane(list).apply {
+            preferredSize = Dimension(500, Math.min(sessions.size * 60 + 10, 480))
+            verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
+            horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
+        }
+        
+        val popup = JBPopupFactory.getInstance().createComponentPopupBuilder(scrollPane, list)
             .setTitle("Session History")
-            .setItemChoosenCallback {
-                val idx = list.selectedIndex
-                if (idx >= 0 && idx < items.size) {
-                    val (label, sid) = items[idx]
-                    // Extract meaningful title from label
-                    val parts = label.split("·").map { it.trim() }
-                    val title = when {
-                        parts.size >= 2 && parts[1].isNotBlank() -> parts[1] // Use preview text
-                        else -> sid.take(8) // Use session ID
+            .setRequestFocus(true)
+            .setFocusable(true)
+            .setResizable(true)
+            .setMovable(false)
+            .createPopup()
+            
+        // Handle selection
+        list.addMouseListener(object : java.awt.event.MouseAdapter() {
+            override fun mouseClicked(e: java.awt.event.MouseEvent) {
+                if (e.clickCount == 2) {
+                    val selectedSession = list.selectedValue
+                    if (selectedSession != null) {
+                        popup.closeOk(null)
+                        val title = extractTitleFromSession(selectedSession)
+                        addChatContent(project, toolWindow, title, selectedSession.id)
                     }
-                    addChatContent(project, toolWindow, title, sid)
                 }
             }
-            .createPopup()
-        popup.showUnderneathOf(anchor)
+        })
+        
+        list.addKeyListener(object : java.awt.event.KeyAdapter() {
+            override fun keyPressed(e: java.awt.event.KeyEvent) {
+                if (e.keyCode == java.awt.event.KeyEvent.VK_ENTER) {
+                    val selectedSession = list.selectedValue
+                    if (selectedSession != null) {
+                        popup.closeOk(null)
+                        val title = extractTitleFromSession(selectedSession)
+                        addChatContent(project, toolWindow, title, selectedSession.id)
+                    }
+                }
+            }
+        })
+        
+        // Position popup to not exceed window bounds
+        val toolWindowComponent = toolWindow.component
+        val toolWindowBounds = toolWindowComponent.bounds
+        val screenBounds = toolWindowComponent.graphicsConfiguration.bounds
+        
+        // Calculate popup position
+        val popupWidth = 500
+        val popupHeight = Math.min(sessions.size * 60 + 50, 500)
+        
+        val anchorLocation = anchor.locationOnScreen
+        var x = anchorLocation.x
+        var y = anchorLocation.y + anchor.height
+        
+        // Ensure popup doesn't exceed right edge
+        if (x + popupWidth > screenBounds.x + screenBounds.width) {
+            x = screenBounds.x + screenBounds.width - popupWidth - 10
+        }
+        
+        // Ensure popup doesn't exceed bottom edge  
+        if (y + popupHeight > screenBounds.y + screenBounds.height) {
+            y = anchorLocation.y - popupHeight
+        }
+        
+        popup.showInScreenCoordinates(toolWindowComponent, Point(x, y))
+    }
+    
+    private fun extractTitleFromSession(session: SessionHistoryLoader.SessionInfo): String {
+        val preview = session.preview?.replace('\n', ' ')?.trim()
+        return when {
+            !preview.isNullOrBlank() -> {
+                // Take first few words as title
+                preview.split(" ").take(3).joinToString(" ")
+            }
+            else -> session.id.take(8)
+        }
+    }
+    
+    // Custom cell renderer for session history
+    private class SessionHistoryRenderer : DefaultListCellRenderer() {
+        override fun getListCellRendererComponent(
+            list: JList<*>?,
+            value: Any?,
+            index: Int,
+            isSelected: Boolean,
+            cellHasFocus: Boolean
+        ): Component {
+            val session = value as? SessionHistoryLoader.SessionInfo
+            if (session == null) {
+                return super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
+            }
+            
+            val panel = JPanel(BorderLayout()).apply {
+                border = JBUI.Borders.empty(8, 12, 8, 12)
+                background = if (isSelected) list?.selectionBackground ?: JBColor.BLUE else list?.background ?: JBColor.WHITE
+            }
+            
+            // Left: Time
+            val timeStr = formatTime(session.lastModified)
+            val timeLabel = JLabel(timeStr).apply {
+                font = Font(Font.SANS_SERIF, Font.PLAIN, 11)
+                foreground = if (isSelected) list?.selectionForeground ?: JBColor.WHITE else JBColor.GRAY
+                preferredSize = Dimension(80, preferredSize.height)
+            }
+            
+            // Center: Summary
+            val preview = session.preview?.replace('\n', ' ')?.trim() ?: "Empty session"
+            val summaryLabel = JLabel(if (preview.length > 35) preview.take(35) + "..." else preview).apply {
+                font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
+                foreground = if (isSelected) list?.selectionForeground ?: JBColor.WHITE else list?.foreground ?: JBColor.BLACK
+            }
+            
+            // Right: Message count
+            val countLabel = JLabel("${session.messageCount}").apply {
+                font = Font(Font.SANS_SERIF, Font.PLAIN, 11)
+                foreground = if (isSelected) list?.selectionForeground ?: JBColor.WHITE else JBColor.GRAY
+                horizontalAlignment = SwingConstants.RIGHT
+                preferredSize = Dimension(30, preferredSize.height)
+            }
+            
+            panel.add(timeLabel, BorderLayout.WEST)
+            panel.add(summaryLabel, BorderLayout.CENTER)
+            panel.add(countLabel, BorderLayout.EAST)
+            
+            return panel
+        }
+        
+        private fun formatTime(timestamp: Long): String {
+            val now = System.currentTimeMillis()
+            val diff = now - timestamp
+            
+            return when {
+                diff < 60 * 1000 -> "刚刚"
+                diff < 60 * 60 * 1000 -> "${diff / (60 * 1000)}分钟前"
+                diff < 24 * 60 * 60 * 1000 -> "${diff / (60 * 60 * 1000)}小时前"
+                diff < 7 * 24 * 60 * 60 * 1000 -> "${diff / (24 * 60 * 60 * 1000)}天前"
+                else -> {
+                    val date = java.text.SimpleDateFormat("MM-dd").format(java.util.Date(timestamp))
+                    date
+                }
+            }
+        }
     }
 
 
