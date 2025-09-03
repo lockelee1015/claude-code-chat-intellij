@@ -15,10 +15,16 @@ import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.ui.popup.ListPopup
 import com.intellij.ui.JBColor
+import com.intellij.icons.AllIcons
 import com.intellij.ui.components.*
 import com.intellij.ui.awt.RelativePoint
 import com.intellij.util.ui.JBUI
 import com.intellij.ui.JBIntSpinner
+import com.intellij.openapi.fileEditor.FileEditorManagerListener
+import com.intellij.openapi.fileEditor.FileEditorManagerEvent
+import com.intellij.openapi.editor.event.CaretListener
+import com.intellij.openapi.editor.event.CaretEvent
+import com.intellij.openapi.editor.EditorFactory
 import com.intellij.ui.scale.JBUIScale
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
@@ -42,8 +48,9 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
     private val currentFileLabel: JLabel // 显示当前文件和选中行（在发送栏最左侧）
     private val sendButton: JButton
     private val clearButton: JButton
-    private val sessionButton: JButton
+    private val sessionTabs: JBTabbedPane
     private val modelComboBox: JComboBox<String>
+    private val chatInputBar: ChatInputBar
     
     // Completion system
     private var completionPanel: JBPanel<*>
@@ -63,8 +70,9 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         currentFileLabel = createCurrentFileLabel()
         sendButton = createSendButton()
         clearButton = createClearButton()
-        sessionButton = createSessionButton()
+        sessionTabs = createSessionTabs()
         modelComboBox = createModelComboBox()
+        chatInputBar = createChatInputBar()
         // scrollPane is now chatScrollPane
         
         // Initialize completion components
@@ -82,7 +90,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         return JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             background = JBColor.background()
-            border = JBUI.Borders.empty(10)
+            border = JBUI.Borders.empty(5, 10, 5, 10) // reduced padding
         }
     }
     
@@ -138,15 +146,20 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
     }
     
     private fun createClearButton(): JButton {
-        return JButton("Clear").apply {
-            addActionListener { clearChat() }
+        return JButton().apply {
+            isVisible = false
+            isEnabled = false
+            preferredSize = Dimension(0, 0)
+            minimumSize = Dimension(0, 0)
+            maximumSize = Dimension(0, 0)
         }
     }
     
-    private fun createSessionButton(): JButton {
-        return JButton("Sessions").apply {
-            addActionListener { showSessionMenu() }
-        }
+    private fun createSessionTabs(): JBTabbedPane {
+        val tabs = JBTabbedPane()
+        tabs.font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
+        // No-op: tabs replaced by toolwindow tabs. Keep method for compatibility if needed.
+        return tabs
     }
     
     private fun createModelComboBox(): JComboBox<String> {
@@ -156,6 +169,13 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
             addActionListener {
                 // Model selection logic here
             }
+        }
+    }
+    
+    private fun createChatInputBar(): ChatInputBar {
+        return ChatInputBar(project) { text, model ->
+            val modelToUse = if (model == "auto") "" else model
+            sessionViewModel.sendPrompt(text, modelToUse)
         }
     }
     
@@ -229,50 +249,28 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
     
     private fun setupLayout() {
         // Top toolbar
-        val toolbarPanel = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT)).apply {
+        val toolbarPanel = JBPanel<JBPanel<*>>(BorderLayout()).apply {
             border = JBUI.Borders.empty(5)
-            add(sessionButton)
-            add(Box.createHorizontalGlue())
-            add(clearButton)
-        }
-        
-        // Main input area (multi-line)
-        val inputScrollPane = JBScrollPane(inputArea).apply {
-            preferredSize = Dimension(600, 100)
-            verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
-            horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
-        }
-        
-        // Bottom controls panel with current file on left, controls on right
-        val controlsPanel = JBPanel<JBPanel<*>>(BorderLayout()).apply {
-            border = JBUI.Borders.empty(5)
-            
-            // Left: current file/select line info
-            add(currentFileLabel, BorderLayout.WEST)
-            
-            // Right: model select + send button
-            val rightPanel = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.RIGHT)).apply {
-                add(JLabel("model select"))
-                add(modelComboBox)
-                add(sendButton)
-            }
+            val leftPanel = JBPanel<JBPanel<*>>(BorderLayout()).apply { /* removed in-tool tabs; kept placeholder for spacing */ }
+            val rightPanel = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.RIGHT)).apply { border = JBUI.Borders.empty() }
+            add(leftPanel, BorderLayout.WEST)
             add(rightPanel, BorderLayout.EAST)
         }
         
-        // Input section (input + controls)
+        // Main input area handled by ChatInputBar now
+        
+        // Input section: reuse shared ChatInputBar (with completion and file info)
         val inputSection = JBPanel<JBPanel<*>>(BorderLayout()).apply {
             border = JBUI.Borders.compound(
                 JBUI.Borders.customLine(JBColor.border(), 1),
                 JBUI.Borders.empty(5)
             )
-            add(inputScrollPane, BorderLayout.CENTER)
-            add(controlsPanel, BorderLayout.SOUTH)
+            add(chatInputBar, BorderLayout.CENTER)
         }
         
         // Center section (chat + completion)
         val centerSection = JBPanel<JBPanel<*>>(BorderLayout()).apply {
             add(chatScrollPane, BorderLayout.CENTER)
-            add(completionPanel, BorderLayout.SOUTH)
         }
         
         // Main layout
@@ -284,6 +282,26 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
     private fun setupEventHandlers() {
         // Listen for editor file changes
         updateCurrentFileInfo()
+        
+        // Track editor selection change (active file changed)
+        project.messageBus.connect(project).subscribe(
+            FileEditorManagerListener.FILE_EDITOR_MANAGER,
+            object : FileEditorManagerListener {
+                override fun selectionChanged(event: FileEditorManagerEvent) {
+                    updateCurrentFileInfo()
+                }
+            }
+        )
+        
+        // Track caret movement to update current line
+        EditorFactory.getInstance().eventMulticaster.addCaretListener(
+            object : CaretListener {
+                override fun caretPositionChanged(event: CaretEvent) {
+                    updateCurrentFileInfo()
+                }
+            },
+            project
+        )
     }
     
     private fun updateCurrentFileInfo() {
@@ -342,11 +360,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
             }
         }
         
-        scope.launch {
-            sessionViewModel.currentSession.collect { session ->
-                sessionButton.text = session?.sessionId?.take(8) ?: "New Session"
-            }
-        }
+        // ToolWindow manages tabs now; no need to reflect current session in local tabs
         
         scope.launch {
             completionManager.completionState.collect { state ->
@@ -529,21 +543,20 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                     
                     messageComponent?.let {
                         messagesPanel.add(it)
-                        messagesPanel.add(Box.createVerticalStrut(4)) // Reduced spacing between messages
+                        messagesPanel.add(Box.createVerticalStrut(0)) // No spacing
                     }
                 }
-                
-                // Add flexible space at the bottom
-                messagesPanel.add(Box.createVerticalGlue())
                 
                 // Refresh the display
                 messagesPanel.revalidate()
                 messagesPanel.repaint()
                 
-                // Scroll to bottom
+                // Keep view anchored near bottom when new messages arrive
                 SwingUtilities.invokeLater {
                     val scrollBar = chatScrollPane.verticalScrollBar
-                    scrollBar.value = scrollBar.maximum
+                    if (scrollBar.maximum - scrollBar.value <= 200) {
+                        scrollBar.value = scrollBar.maximum
+                    }
                 }
                 
             } catch (e: Exception) {
@@ -649,21 +662,21 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
      */
     private fun createMessageComponent(iconText: String, iconColor: Color, content: String, textColor: Color): JPanel {
         return JBPanel<JBPanel<*>>(BorderLayout()).apply {
-            border = JBUI.Borders.empty(2, 0, 2, 0) // Small top/bottom padding only
+            border = JBUI.Borders.empty(0, 0, 0, 0) // No padding
             background = JBColor.background()
             
             // Icon area (left side) - fixed width, top aligned
             val iconPanel = JBPanel<JBPanel<*>>(BorderLayout()).apply {
                 background = JBColor.background()
-                preferredSize = Dimension(20, -1) // Fixed width
+                preferredSize = Dimension(15, -1) // Narrower
                 
                 val iconLabel = JBLabel(iconText).apply {
                     foreground = iconColor
-                    font = Font(Font.SANS_SERIF, Font.BOLD, 12)
+                    font = Font(Font.SANS_SERIF, Font.BOLD, 11)
                     horizontalAlignment = SwingConstants.LEFT
-                    verticalAlignment = SwingConstants.TOP // Top align the icon
+                    verticalAlignment = SwingConstants.TOP
                 }
-                add(iconLabel, BorderLayout.NORTH) // Put icon at top
+                add(iconLabel, BorderLayout.NORTH)
             }
             add(iconPanel, BorderLayout.WEST)
             
@@ -832,9 +845,173 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
     }
     
     private fun showSessionMenu() {
-        // Show session selection menu
-        // This can be expanded later with actual session management
-        Messages.showInfoMessage(project, "Session management coming soon!", "Sessions")
+        val projectPath = project.basePath
+        val options = mutableListOf<SessionMenuItem>()
+        options.add(SessionMenuItem(label = "Start New Session", type = SessionMenuType.NEW))
+        
+        // Recent sessions (from file system)
+        try {
+            if (projectPath != null) {
+                val recent = com.claudecodechat.session.SessionHistoryLoader()
+                    .getRecentSessionsWithDetails(projectPath, 10)
+                if (recent.isNotEmpty()) {
+                    options.add(SessionMenuItem(label = "— Recent —", type = SessionMenuType.SEPARATOR))
+                    recent.forEach { info ->
+                        val preview = info.preview?.replace('\n', ' ')
+                        val display = if (!preview.isNullOrBlank()) {
+                            "${info.id.take(8)}  ·  ${preview.take(60)}"
+                        } else {
+                            info.id.take(8)
+                        }
+                        options.add(SessionMenuItem(label = display, type = SessionMenuType.RESUME, sessionId = info.id))
+                    }
+                }
+            }
+        } catch (_: Exception) { }
+        
+        // Fallback to persisted list if needed
+        try {
+            val persisted = com.claudecodechat.persistence.SessionPersistence.getInstance(project).getRecentSessionIds()
+            if (persisted.isNotEmpty()) {
+                if (options.none { it.type == SessionMenuType.RESUME }) {
+                    options.add(SessionMenuItem(label = "— Recent —", type = SessionMenuType.SEPARATOR))
+                }
+                persisted.take(10).forEach { id ->
+                    if (options.none { it.sessionId == id }) {
+                        options.add(SessionMenuItem(label = id.take(8), type = SessionMenuType.RESUME, sessionId = id))
+                    }
+                }
+            }
+        } catch (_: Exception) { }
+        
+        if (options.isEmpty()) {
+            options.add(SessionMenuItem(label = "Start New Session", type = SessionMenuType.NEW))
+        }
+        
+        val popup = JBPopupFactory.getInstance()
+            .createPopupChooserBuilder(options)
+            .setTitle("Sessions")
+            .setRenderer(object : DefaultListCellRenderer() {
+                override fun getListCellRendererComponent(list: JList<*>, value: Any?, index: Int, isSelected: Boolean, cellHasFocus: Boolean): Component {
+                    val c = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus) as JLabel
+                    val item = value as SessionMenuItem
+                    c.text = item.label
+                    c.isEnabled = item.type != SessionMenuType.SEPARATOR
+                    return c
+                }
+            })
+            .setItemChosenCallback { item ->
+                when (item.type) {
+                    SessionMenuType.NEW -> sessionViewModel.startNewSession()
+                    SessionMenuType.RESUME -> item.sessionId?.let { sessionViewModel.resumeSession(it) }
+                    SessionMenuType.SEPARATOR -> {}
+                }
+            }
+            .createPopup()
+        
+        popup.showUnderneathOf(sessionTabs)
+    }
+
+    private data class SessionMenuItem(
+        val label: String,
+        val type: SessionMenuType,
+        val sessionId: String? = null,
+    )
+
+    private enum class SessionMenuType { NEW, RESUME, SEPARATOR }
+
+    private fun addPlusTab(tabs: JBTabbedPane) {
+        val plus = JPanel()
+        plus.isOpaque = false
+        tabs.addTab("+", plus)
+    }
+
+    private fun addOrUpdateActiveSessionTab(tabs: JBTabbedPane, title: String?, id: String?) {
+        // Real tabs are all except the last plus tab
+        val count = tabs.tabCount
+        val realCount = if (count == 0) 0 else count - 1
+        val displayTitle = (title ?: "test").take(40)
+        val secondary = secondaryTextColor()
+        val idHtml = if (id != null) " <span style='color: rgb(${secondary.red},${secondary.green},${secondary.blue});'>(${id.take(8)})</span>" else ""
+        val htmlTitle = "<html>$displayTitle$idHtml</html>"
+        if (realCount == 0) {
+            val panel = JPanel()
+            panel.isOpaque = false
+            panel.putClientProperty("sessionId", id)
+            tabs.insertTab(htmlTitle, null, panel, id ?: displayTitle, 0)
+            if (tabs.tabCount == 1) addPlusTab(tabs)
+            tabs.selectedIndex = 0
+        } else {
+            val comp = tabs.getComponentAt(0) as? JComponent
+            comp?.putClientProperty("sessionId", id)
+            tabs.setTitleAt(0, htmlTitle)
+            tabs.setToolTipTextAt(0, id ?: displayTitle)
+            tabs.selectedIndex = 0
+        }
+    }
+
+    private fun addSessionTab(tabs: JBTabbedPane, title: String?, id: String?) {
+        val displayTitle = (title ?: "(new session)").take(40)
+        val secondary = secondaryTextColor()
+        val idHtml = if (id != null) " <span style='color: rgb(${secondary.red},${secondary.green},${secondary.blue});'>(${id.take(8)})</span>" else ""
+        val htmlTitle = "<html>$displayTitle$idHtml</html>"
+        val panel = JPanel()
+        panel.isOpaque = false
+        panel.putClientProperty("sessionId", id)
+        val insertIndex = maxOf(0, tabs.tabCount - 1)
+        tabs.insertTab(htmlTitle, null, panel, id ?: displayTitle, insertIndex)
+        tabs.selectedIndex = insertIndex
+        if (id != null) {
+            sessionViewModel.resumeSession(id)
+        } else {
+            sessionViewModel.startNewSession()
+        }
+    }
+
+    private fun showSessionAddChooser(tabs: JBTabbedPane) {
+        val projectPath = project.basePath
+        val options = mutableListOf<SessionMenuItem>()
+        options.add(SessionMenuItem(label = "Start New Session", type = SessionMenuType.NEW))
+        try {
+            if (projectPath != null) {
+                val recent = com.claudecodechat.session.SessionHistoryLoader()
+                    .getRecentSessionsWithDetails(projectPath, 15)
+                if (recent.isNotEmpty()) {
+                    options.add(SessionMenuItem(label = "— Recent —", type = SessionMenuType.SEPARATOR))
+                    recent.forEach { info ->
+                        val preview = info.preview?.replace('\n', ' ')
+                        val display = if (!preview.isNullOrBlank()) {
+                            "${info.id.take(8)}  ·  ${preview.take(60)}"
+                        } else {
+                            info.id.take(8)
+                        }
+                        options.add(SessionMenuItem(label = display, type = SessionMenuType.RESUME, sessionId = info.id))
+                    }
+                }
+            }
+        } catch (_: Exception) { }
+
+        val popup = JBPopupFactory.getInstance()
+            .createPopupChooserBuilder(options)
+            .setTitle("Add Session Tab")
+            .setRenderer(object : DefaultListCellRenderer() {
+                override fun getListCellRendererComponent(list: JList<*>, value: Any?, index: Int, isSelected: Boolean, cellHasFocus: Boolean): Component {
+                    val c = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus) as JLabel
+                    val item = value as SessionMenuItem
+                    c.text = item.label
+                    c.isEnabled = item.type != SessionMenuType.SEPARATOR
+                    return c
+                }
+            })
+            .setItemChosenCallback { item ->
+                when (item.type) {
+                    SessionMenuType.NEW -> addSessionTab(tabs, title = "(new session)", id = null)
+                    SessionMenuType.RESUME -> addSessionTab(tabs, title = null, id = item.sessionId)
+                    SessionMenuType.SEPARATOR -> {}
+                }
+            }
+            .createPopup()
+        popup.showUnderneathOf(sessionTabs)
     }
     
     private fun extractToolParameters(toolName: String, input: String): String {

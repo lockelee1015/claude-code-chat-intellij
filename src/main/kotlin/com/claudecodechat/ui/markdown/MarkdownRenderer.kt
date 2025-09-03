@@ -59,13 +59,12 @@ object MarkdownRenderer {
             <style>
               body { margin: 0; color: $colorForeground; background: $colorBackground; font-family: ${fontFamily}, sans-serif; font-size: 1em; }
               pre, code { font-family: Menlo, Monaco, Consolas, monospace; font-size: 1em; }
-              /* 强制自动换行，避免横向滚动 */
-              pre { background: rgba(0,0,0,0.05); padding: 6px 8px; border-radius: 4px; white-space: pre-wrap; word-break: break-word; overflow-x: hidden; margin: 0.25em 0; }
-              code { background: rgba(0,0,0,0.06); padding: 1px 3px; border-radius: 3px; white-space: pre-wrap; word-break: break-word; }
+              /* 尽量使用 Swing 支持的 CSS 子集，避免解析异常 */
+              pre { background-color: rgba(0,0,0,0.05); padding: 6px 8px; white-space: pre-wrap; margin: 0.25em 0; }
+              code { background-color: rgba(0,0,0,0.06); padding: 1px 3px; }
               p { margin: 0.25em 0; }
-              p, li, td, th, div, span { word-break: break-word; overflow-wrap: anywhere; }
               ul, ol { margin-top: 2px; margin-bottom: 2px; }
-              table { border-collapse: collapse; table-layout: fixed; width: 100%; }
+              table { width: 100%; }
               th, td { border: 1px solid rgba(127,127,127,0.35); padding: 4px 6px; }
               a { color: #6aa9ff; text-decoration: none; }
             </style>

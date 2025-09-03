@@ -385,7 +385,8 @@ class SessionViewModel(private val project: Project) : Disposable {
                     // Still update session info even if no messages loaded
                 }
                 
-                // Clear current messages and load historical ones
+                // Clear current messages first to force UI refresh when switching
+                _messages.value = emptyList()
                 _messages.value = historicalMessages
                 
                 // Update session info
