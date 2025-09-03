@@ -1,5 +1,9 @@
 package com.claudecodechat.ui.swing.renderers
 
+import com.intellij.ide.BrowserUtil
+import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.project.ProjectManager
+import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.JBUI
@@ -7,6 +11,9 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.awt.*
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
+import java.io.File
 import javax.swing.JPanel
 import javax.swing.JTextArea
 
@@ -20,11 +27,13 @@ class ReadRenderer : ToolRenderer() {
     }
     
     override fun extractDisplayParameters(toolInput: JsonElement?): String {
+        return getFilePath(toolInput)
+    }
+    
+    private fun getFilePath(toolInput: JsonElement?): String {
         try {
             if (toolInput is JsonObject) {
-                val filePath = toolInput["target_file"]?.jsonPrimitive?.content ?: ""
-                // Remove project prefix for cleaner display
-                return filePath.substringAfterLast("/")
+                return toolInput["file_path"]?.jsonPrimitive?.content ?: ""
             }
         } catch (e: Exception) {
             // Ignore parsing errors
@@ -38,14 +47,10 @@ class ReadRenderer : ToolRenderer() {
         }
         
         val lines = input.toolOutput.split("\n")
-        val previewLines = lines.take(8).joinToString("\n")
-        val displayText = if (lines.size > 8) {
-            "$previewLines\n... +${lines.size - 8} more lines"
-        } else {
-            previewLines
-        }
+        val totalLines = lines.size
         
-        val editorContent = JTextArea(displayText).apply {
+        // Simple line count display
+        val summaryLabel = JTextArea("Read $totalLines lines").apply {
             foreground = JBColor.foreground()
             background = JBColor.background()
             font = Font(Font.MONOSPACED, Font.PLAIN, 11)
@@ -56,10 +61,10 @@ class ReadRenderer : ToolRenderer() {
         
         return JPanel(BorderLayout()).apply {
             background = JBColor.background()
-            add(JBScrollPane(editorContent).apply {
-                preferredSize = Dimension(-1, 200)
-                border = JBUI.Borders.empty()
-            }, BorderLayout.CENTER)
+            add(summaryLabel, BorderLayout.CENTER)
+            
+            // Set smaller height
+            preferredSize = Dimension(-1, 35)
         }
     }
     

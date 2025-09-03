@@ -72,21 +72,23 @@ class TodoWriteRenderer : ToolRenderer() {
         
         try {
             if (input is JsonObject) {
-                val todosArray = input["todos"] as? JsonArray
-                if (todosArray != null) {
-                    for (todoElement in todosArray) {
-                        if (todoElement is JsonObject) {
-                            val content = todoElement["content"]?.jsonPrimitive?.content ?: ""
-                            val status = todoElement["status"]?.jsonPrimitive?.content ?: "pending"
-                            
-                            if (content.isNotEmpty()) {
-                                val todoItem = createTodoItemComponent(content, status)
-                                todoItem.maximumSize = Dimension(Int.MAX_VALUE, todoItem.preferredSize.height)
-                                panel.add(todoItem)
-                                panel.add(Box.createVerticalStrut(4))
+                                        val todosArray = input["todos"] as? JsonArray
+                        if (todosArray != null) {
+                            for (todoElement in todosArray) {
+                                if (todoElement is JsonObject) {
+                                    val content = todoElement["content"]?.jsonPrimitive?.content ?: ""
+                                    val status = todoElement["status"]?.jsonPrimitive?.content ?: "pending"
+                                    val activeForm = todoElement["activeForm"]?.jsonPrimitive?.content
+                                    
+                                    if (content.isNotEmpty()) {
+                                        val isCurrentChange = activeForm != null && activeForm.isNotEmpty()
+                                        val todoItem = createTodoItemComponent(content, status, isCurrentChange)
+                                        todoItem.maximumSize = Dimension(Int.MAX_VALUE, todoItem.preferredSize.height)
+                                        panel.add(todoItem)
+                                        panel.add(Box.createVerticalStrut(4))
+                                    }
+                                }
                             }
-                        }
-                    }
                 }
             }
         } catch (e: Exception) {
@@ -101,7 +103,7 @@ class TodoWriteRenderer : ToolRenderer() {
         return panel
     }
     
-    private fun createTodoItemComponent(content: String, status: String): JPanel {
+    private fun createTodoItemComponent(content: String, status: String, isCurrentChange: Boolean = false): JPanel {
         val itemPanel = JBPanel<JBPanel<*>>(BorderLayout()).apply {
             background = JBColor.background()
             alignmentX = Component.LEFT_ALIGNMENT
@@ -122,7 +124,11 @@ class TodoWriteRenderer : ToolRenderer() {
         
         val contentLabel = JBLabel(content).apply {
             foreground = JBColor.foreground()
-            font = Font(Font.MONOSPACED, Font.PLAIN, 11)
+            font = if (isCurrentChange) {
+                Font(Font.MONOSPACED, Font.BOLD, 11)  // 当前变更项加粗
+            } else {
+                Font(Font.MONOSPACED, Font.PLAIN, 11)
+            }
             verticalAlignment = SwingConstants.TOP
         }
         
