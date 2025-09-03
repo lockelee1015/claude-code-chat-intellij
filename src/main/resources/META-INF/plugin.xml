@@ -42,6 +42,7 @@
                     secondary="false"
                     icon="/META-INF/pluginIcon.svg"
                     anchor="right"
+                    canCloseContents="true"
                     factoryClass="com.claudecodechat.toolWindow.ClaudeChatSimpleToolWindowFactory"/>
         
         <!-- Settings -->

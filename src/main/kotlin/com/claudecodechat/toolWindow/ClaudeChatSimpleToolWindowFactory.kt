@@ -54,6 +54,9 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
         
         (toolWindow as? ToolWindowEx)?.setTitleActions(listOf(newSessionAction, historyAction))
 
+
+
+
         // Add content manager listener to customize tab rendering
         toolWindow.contentManager.addContentManagerListener(object : ContentManagerListener {
             override fun selectionChanged(event: ContentManagerEvent) {
