@@ -156,7 +156,7 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
             }
         }
         val inputPanel = JPanel(java.awt.BorderLayout()).apply {
-            border = com.intellij.util.ui.JBUI.Borders.empty(10, 20, 20, 20)
+            border = com.intellij.util.ui.JBUI.Borders.empty(0, 10, 0, 10)
             add(inputBar, java.awt.BorderLayout.CENTER)
         }
 

@@ -112,7 +112,7 @@ class ChatInputBar(
         }
 
         val controls = JBPanel<JBPanel<*>>(BorderLayout()).apply {
-            border = JBUI.Borders.empty(5)
+            border = JBUI.Borders.empty()
             add(currentFileLabel, BorderLayout.WEST)
             val right = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.RIGHT)).apply {
                 add(modelComboBox)
@@ -122,10 +122,7 @@ class ChatInputBar(
         }
 
         val section = JBPanel<JBPanel<*>>(BorderLayout()).apply {
-            border = JBUI.Borders.compound(
-                JBUI.Borders.customLine(JBColor.border(), 1),
-                JBUI.Borders.empty(5)
-            )
+            border = JBUI.Borders.empty()
             add(inputScroll, BorderLayout.CENTER)
             add(controls, BorderLayout.SOUTH)
         }
