@@ -132,7 +132,18 @@ class ChatInputBar(
             preferredSize = Dimension(600, 100)
             verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
             horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
+            border = JBUI.Borders.customLine(JBColor.border(), 1)
         }
+        
+        // Add focus listener to change border color
+        inputArea.addFocusListener(object : java.awt.event.FocusListener {
+            override fun focusGained(e: java.awt.event.FocusEvent?) {
+                inputScroll.border = JBUI.Borders.customLine(JBColor.BLUE, 2)
+            }
+            override fun focusLost(e: java.awt.event.FocusEvent?) {
+                inputScroll.border = JBUI.Borders.customLine(JBColor.border(), 1)
+            }
+        })
 
         val controls = JBPanel<JBPanel<*>>(BorderLayout()).apply {
             border = JBUI.Borders.empty()
@@ -161,6 +172,9 @@ class ChatInputBar(
 
     fun requestInputFocus() { inputArea.requestFocus() }
     fun setText(text: String) { inputArea.text = text }
+    fun getText(): String = inputArea.text
+    fun getCaretPosition(): Int = inputArea.caretPosition
+    fun setCaretPosition(pos: Int) { inputArea.caretPosition = pos }
     fun appendText(text: String) {
         val current = inputArea.text
         inputArea.text = if (current.isEmpty()) text else "$current\n\n$text"

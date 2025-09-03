@@ -3,6 +3,7 @@ package com.claudecodechat.toolWindow
 import com.claudecodechat.ui.swing.ClaudeChatPanel
 import com.claudecodechat.state.SessionViewModel
 import com.claudecodechat.session.SessionHistoryLoader
+import com.claudecodechat.persistence.SessionPersistence
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.project.DumbAwareAction
@@ -35,8 +36,39 @@ import java.awt.event.MouseEvent
 class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
     
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
-        // Show welcome by default; user can pick a session or start new
-        addWelcomeContent(project, toolWindow)
+        val sessionPersistence = SessionPersistence.getInstance(project)
+        
+        // Restore saved tabs or show welcome by default
+        val savedTabs = sessionPersistence.getOpenTabs()
+        if (savedTabs.isNotEmpty()) {
+            // Restore saved tabs
+            for (tabInfo in savedTabs) {
+                if (tabInfo.sessionId != null) {
+                    addChatContent(project, toolWindow, tabInfo.title, tabInfo.sessionId)
+                } else {
+                    addWelcomeContent(project, toolWindow)
+                }
+            }
+            
+            // Set the active tab
+            val activeTab = savedTabs.find { it.isActive }
+            activeTab?.let { tab ->
+                val contentManager = toolWindow.contentManager
+                for (i in 0 until contentManager.contentCount) {
+                    val content = contentManager.getContent(i)
+                    val panel = content?.getUserData(CHAT_PANEL_KEY)
+                    // For welcome content, check if it's the active one
+                    if ((tab.sessionId == null && panel == null) || 
+                        (tab.sessionId != null && panel != null)) {
+                        content?.let { contentManager.setSelectedContent(it) }
+                        break
+                    }
+                }
+            }
+        } else {
+            // Show welcome by default; user can pick a session or start new
+            addWelcomeContent(project, toolWindow)
+        }
 
         // Add title actions: plus button for new session and history button for session history
         val newSessionAction: AnAction = object : DumbAwareAction("New Session", "Start new session", AllIcons.General.Add) {
@@ -59,11 +91,21 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
 
 
 
-        // Add content manager listener to customize tab rendering
+        // Add content manager listener to customize tab rendering and save state
         toolWindow.contentManager.addContentManagerListener(object : ContentManagerListener {
             override fun selectionChanged(event: ContentManagerEvent) {
                 // Update tab icons when selection changes
                 updateTabIcons(project, toolWindow)
+                // Save current tab state
+                saveTabState(project, toolWindow)
+            }
+            
+            override fun contentAdded(event: ContentManagerEvent) {
+                saveTabState(project, toolWindow)
+            }
+            
+            override fun contentRemoved(event: ContentManagerEvent) {
+                saveTabState(project, toolWindow)
             }
         })
     }
@@ -72,6 +114,7 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
     
     companion object {
         private val CHAT_PANEL_KEY = Key.create<ClaudeChatPanel>("CHAT_PANEL")
+        private val SESSION_ID_KEY = Key.create<String>("SESSION_ID")
     }
 
     private fun updateTabIcons(project: Project, toolWindow: ToolWindow) {
@@ -106,6 +149,7 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
         val displayTitle = shortenTitle(title, 5) // Use shortened title
         val content = ContentFactory.getInstance().createContent(chatPanel, displayTitle, false)
         content.putUserData(CHAT_PANEL_KEY, chatPanel)
+        sessionId?.let { content.putUserData(SESSION_ID_KEY, it) }
         content.isCloseable = true
         toolWindow.contentManager.addContent(content)
         toolWindow.contentManager.setSelectedContent(content)
@@ -343,6 +387,24 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
                 }
             }
         }
+    }
+    
+    private fun saveTabState(project: Project, toolWindow: ToolWindow) {
+        val sessionPersistence = SessionPersistence.getInstance(project)
+        val contentManager = toolWindow.contentManager
+        val tabs = mutableListOf<SessionPersistence.TabInfo>()
+        
+        for (i in 0 until contentManager.contentCount) {
+            val content = contentManager.getContent(i)
+            if (content != null) {
+                val sessionId = content.getUserData(SESSION_ID_KEY)
+                val title = content.displayName ?: "Untitled"
+                val isActive = contentManager.selectedContent == content
+                tabs.add(SessionPersistence.TabInfo(sessionId, title, isActive))
+            }
+        }
+        
+        sessionPersistence.saveOpenTabs(tabs)
     }
 
 

@@ -6,9 +6,6 @@ import com.claudecodechat.models.ClaudeStreamMessage
 import com.claudecodechat.models.MessageType
 import com.claudecodechat.settings.ClaudeSettings
 import com.claudecodechat.state.SessionViewModel
-import com.claudecodechat.completion.CompletionManager
-import com.claudecodechat.completion.CompletionState
-import com.claudecodechat.completion.CompletionTrigger
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
@@ -22,11 +19,6 @@ import com.intellij.ui.components.*
 import com.intellij.ui.awt.RelativePoint
 import com.intellij.util.ui.JBUI
 import com.intellij.ui.JBIntSpinner
-import com.intellij.openapi.fileEditor.FileEditorManagerListener
-import com.intellij.openapi.fileEditor.FileEditorManagerEvent
-import com.intellij.openapi.editor.event.CaretListener
-import com.intellij.openapi.editor.event.CaretEvent
-import com.intellij.openapi.editor.EditorFactory
 import com.intellij.ui.scale.JBUIScale
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
@@ -40,24 +32,14 @@ import com.claudecodechat.ui.markdown.MarkdownRenderConfig
 
 class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>() {
     private val sessionViewModel = SessionViewModel.getInstance(project)
-    private val completionManager = CompletionManager(project)
     private val settings = ClaudeSettings.getInstance()
     
     // UI Components
     private val messagesPanel: JPanel
     private val chatScrollPane: JScrollPane
-    private val inputArea: JBTextArea // 多行输入区域
-    private val currentFileLabel: JLabel // 显示当前文件和选中行（在发送栏最左侧）
-    private val sendButton: JButton
-    private val clearButton: JButton
     private val sessionTabs: JBTabbedPane
-    private val modelComboBox: JComboBox<String>
     private val chatInputBar: ChatInputBar
     
-    // Completion system
-    private var completionList: JList<String>
-    private var completionPopup: JBPopup? = null
-    private var currentCompletionState: CompletionState? = null
     
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     
@@ -67,17 +49,9 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         // Initialize UI components
         messagesPanel = createMessagesPanel()
         chatScrollPane = createChatScrollPane()
-        inputArea = createInputArea()
-        currentFileLabel = createCurrentFileLabel()
-        sendButton = createSendButton()
-        clearButton = createClearButton()
         sessionTabs = createSessionTabs()
-        modelComboBox = createModelComboBox()
         chatInputBar = createChatInputBar()
-        // scrollPane is now chatScrollPane
         
-        // Initialize completion components
-        completionList = createCompletionList()
         
         setupLayout()
         setupEventHandlers()
@@ -98,61 +72,13 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
             preferredSize = Dimension(600, 400)
             verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
             horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
-            border = JBUI.Borders.compound(
-                JBUI.Borders.customLine(JBColor.border(), 1),
-                JBUI.Borders.empty()
-            )
+            border = JBUI.Borders.empty()
         }
     }
     
-    private fun createInputArea(): JBTextArea {
-        return JBTextArea(4, 50).apply {
-            lineWrap = true
-            wrapStyleWord = true
-            font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
-            
-            addKeyListener(object : KeyAdapter() {
-                override fun keyPressed(e: KeyEvent) {
-                    handleInputKeyPress(e)
-                }
-                
-                override fun keyReleased(e: KeyEvent) {
-                    handleInputKeyRelease(e)
-                }
-            })
-            
-            document.addDocumentListener(object : javax.swing.event.DocumentListener {
-                override fun insertUpdate(e: javax.swing.event.DocumentEvent) = updateCompletion()
-                override fun removeUpdate(e: javax.swing.event.DocumentEvent) = updateCompletion()
-                override fun changedUpdate(e: javax.swing.event.DocumentEvent) = updateCompletion()
-            })
-        }
-    }
     
-    private fun createCurrentFileLabel(): JLabel {
-        return JLabel().apply {
-            font = Font(Font.SANS_SERIF, Font.PLAIN, 11)
-            foreground = Color.decode("#888888")
-            text = ""
-            border = JBUI.Borders.empty(0, 5, 0, 5)
-        }
-    }
     
-    private fun createSendButton(): JButton {
-        return JButton("Send (Ctrl+Enter)").apply {
-            addActionListener { sendMessage() }
-        }
-    }
     
-    private fun createClearButton(): JButton {
-        return JButton().apply {
-            isVisible = false
-            isEnabled = false
-            preferredSize = Dimension(0, 0)
-            minimumSize = Dimension(0, 0)
-            maximumSize = Dimension(0, 0)
-        }
-    }
     
     private fun createSessionTabs(): JBTabbedPane {
         val tabs = JBTabbedPane()
@@ -161,15 +87,6 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         return tabs
     }
     
-    private fun createModelComboBox(): JComboBox<String> {
-        val models = arrayOf("auto", "sonnet", "opus", "haiku")
-        return JComboBox(models).apply {
-            selectedItem = "auto"
-            addActionListener {
-                // Model selection logic here
-            }
-        }
-    }
     
     private fun createChatInputBar(): ChatInputBar {
         return ChatInputBar(project) { text, model ->
@@ -180,42 +97,6 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
     
     
     
-    private fun createCompletionList(): JList<String> {
-        return JList<String>().apply {
-            selectionMode = ListSelectionModel.SINGLE_SELECTION
-            background = JBColor.background()
-            foreground = JBColor.foreground()
-            font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
-            
-            // Set custom cell renderer for icons
-            cellRenderer = CompletionListCellRenderer()
-            
-            addMouseListener(object : MouseAdapter() {
-                override fun mouseClicked(e: MouseEvent) {
-                    if (e.clickCount == 2) {
-                        // Double click to select completion
-                        applySelectedCompletion()
-                    }
-                }
-            })
-            
-            addKeyListener(object : KeyAdapter() {
-                override fun keyPressed(e: KeyEvent) {
-                    when (e.keyCode) {
-                        KeyEvent.VK_ENTER -> {
-                            applySelectedCompletion()
-                            e.consume()
-                        }
-                        KeyEvent.VK_ESCAPE -> {
-                            hideCompletion()
-                            inputArea.requestFocus()
-                            e.consume()
-                        }
-                    }
-                }
-            })
-        }
-    }
     
 
     
@@ -233,10 +114,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         
         // Input section: reuse shared ChatInputBar (with completion and file info)
         val inputSection = JBPanel<JBPanel<*>>(BorderLayout()).apply {
-            border = JBUI.Borders.compound(
-                JBUI.Borders.customLine(JBColor.border(), 1),
-                JBUI.Borders.empty(5)
-            )
+            border = JBUI.Borders.empty(0, 10, 0, 10)
             add(chatInputBar, BorderLayout.CENTER)
         }
         
@@ -252,70 +130,11 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
     }
     
     private fun setupEventHandlers() {
-        // Listen for editor file changes
-        updateCurrentFileInfo()
-        
-        // Track editor selection change (active file changed)
-        project.messageBus.connect(project).subscribe(
-            FileEditorManagerListener.FILE_EDITOR_MANAGER,
-            object : FileEditorManagerListener {
-                override fun selectionChanged(event: FileEditorManagerEvent) {
-                    updateCurrentFileInfo()
-                }
-            }
-        )
-        
-        // Track caret movement to update current line
-        EditorFactory.getInstance().eventMulticaster.addCaretListener(
-            object : CaretListener {
-                override fun caretPositionChanged(event: CaretEvent) {
-                    updateCurrentFileInfo()
-                }
-            },
-            project
-        )
+        // File info tracking is now handled by ChatInputBar
     }
     
     private fun updateCurrentFileInfo() {
-        scope.launch {
-            try {
-                val fileEditorManager = com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project)
-                val selectedEditor = fileEditorManager.selectedTextEditor
-                
-                if (selectedEditor != null) {
-                    val virtualFile = selectedEditor.virtualFile
-                    val caretModel = selectedEditor.caretModel
-                    val line = caretModel.logicalPosition.line + 1
-                    
-                    val fileInfo = when {
-                        virtualFile != null -> {
-                            val relativePath = com.intellij.openapi.vfs.VfsUtilCore.getRelativePath(
-                                virtualFile, 
-                                project.baseDir ?: virtualFile
-                            ) ?: virtualFile.name
-                            "current file: $relativePath | line: $line"
-                        }
-                        else -> ""
-                    }
-                    
-                    ApplicationManager.getApplication().invokeLater {
-                        currentFileLabel.text = fileInfo
-                        currentFileLabel.isVisible = fileInfo.isNotEmpty()
-                    }
-                } else {
-                    ApplicationManager.getApplication().invokeLater {
-                        currentFileLabel.text = ""
-                        currentFileLabel.isVisible = false
-                    }
-                }
-            } catch (e: Exception) {
-                // Ignore errors, just don't show file info
-                ApplicationManager.getApplication().invokeLater {
-                    currentFileLabel.text = ""
-                    currentFileLabel.isVisible = false
-                }
-            }
-        }
+        // This method is no longer used as ChatInputBar handles file info tracking
     }
     
     private fun observeViewModel() {
@@ -325,20 +144,11 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
             }
         }
         
-        scope.launch {
-            sessionViewModel.isLoading.collect { isLoading ->
-                sendButton.isEnabled = !isLoading
-                sendButton.text = if (isLoading) "Sending..." else "Send (Ctrl+Enter)"
-            }
-        }
+        // Loading state is now handled by ChatInputBar
         
         // ToolWindow manages tabs now; no need to reflect current session in local tabs
         
-        scope.launch {
-            completionManager.completionState.collect { state ->
-                handleCompletionState(state)
-            }
-        }
+        // Completion state is now handled by ChatInputBar
     }
     
     private fun loadInitialData() {
@@ -346,182 +156,40 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
     }
     
     private fun handleInputKeyPress(e: KeyEvent) {
-        when {
-            e.keyCode == KeyEvent.VK_ENTER && e.isControlDown -> {
-                sendMessage()
-                e.consume()
-            }
-            e.keyCode == KeyEvent.VK_ESCAPE -> {
-                hideCompletion()
-                e.consume()
-            }
-            e.keyCode == KeyEvent.VK_UP || e.keyCode == KeyEvent.VK_DOWN -> {
-                if (completionPopup?.isVisible == true) {
-                    // Navigate completion list
-                    val currentIndex = completionList.selectedIndex
-                    val itemCount = completionList.model.size
-                    
-                    if (itemCount > 0) {
-                        val newIndex = when (e.keyCode) {
-                            KeyEvent.VK_UP -> if (currentIndex > 0) currentIndex - 1 else itemCount - 1
-                            KeyEvent.VK_DOWN -> if (currentIndex < itemCount - 1) currentIndex + 1 else 0
-                            else -> currentIndex
-                        }
-                        completionList.selectedIndex = newIndex
-                        completionList.ensureIndexIsVisible(newIndex)
-                    }
-                    e.consume()
-                    return
-                }
-            }
-            e.keyCode == KeyEvent.VK_TAB || e.keyCode == KeyEvent.VK_ENTER -> {
-                if (completionPopup?.isVisible == true) {
-                    // Accept completion with both TAB and ENTER
-                    applySelectedCompletion()
-                    e.consume()
-                    return
-                }
-            }
-        }
+        // This method is no longer needed as ChatInputBar handles key events
     }
     
     private fun handleInputKeyRelease(e: KeyEvent) {
-        // Trigger completion update after key release
-        if (!e.isControlDown && !e.isAltDown) {
-            updateCompletion()
-        }
+        // This method is no longer needed as ChatInputBar handles key events
     }
     
     private fun updateCompletion() {
-        val text = inputArea.text
-        val cursorPos = inputArea.caretPosition
-        completionManager.updateCompletion(text, cursorPos)
+        // This method is no longer used as ChatInputBar handles its own completion
     }
     
-    private fun handleCompletionState(state: CompletionState) {
-        if (state.isShowing && state.items.isNotEmpty()) {
-            showCompletionPopup(state)
-        } else {
-            hideCompletion()
-        }
+    private fun handleCompletionState(state: Any) {
+        // This method is no longer used as ChatInputBar handles its own completion
     }
     
-    private fun showCompletionPopup(state: CompletionState) {
-        // Store current state for apply completion
-        currentCompletionState = state
-        
-        // Create display strings for completion items
-        val items = state.items.map { item ->
-            when (item) {
-                is com.claudecodechat.completion.CompletionItem.SlashCommand -> {
-                    "/${item.name} - ${item.description}"
-                }
-                is com.claudecodechat.completion.CompletionItem.FileReference -> {
-                    "${item.fileName} - ${item.relativePath}"
-                }
-            }
-        }
-        
-        val listModel = DefaultListModel<String>()
-        items.forEach { listModel.addElement(it) }
-        
-        completionList.model = listModel
-        completionList.selectedIndex = state.selectedIndex
-        
-        // Close existing popup
-        completionPopup?.cancel()
-        
-        // Create popup with proper sizing
-        completionPopup = JBPopupFactory.getInstance().createPopupChooserBuilder(items)
-            .setTitle("Completions")
-            .setMovable(false)
-            .setResizable(false)
-            .setRequestFocus(false)
-            .setItemChosenCallback {
-                applySelectedCompletion()
-            }
-            .addListener(object : com.intellij.openapi.ui.popup.JBPopupListener {
-                override fun onClosed(event: com.intellij.openapi.ui.popup.LightweightWindowEvent) {
-                    completionPopup = null
-                    currentCompletionState = null
-                }
-            })
-            .createPopup()
-        
-        // Calculate popup position and size to align perfectly with input area
-        val inputBounds = inputArea.bounds
-        val inputLocationOnScreen = inputArea.locationOnScreen
-        
-        // Set popup size to match input width with fixed height
-        val popupWidth = inputBounds.width
-        val popupHeight = 220  // Height for ~8 items
-        completionPopup?.size = Dimension(popupWidth, popupHeight)
-        
-        // Position popup directly above the input area
-        val popupX = inputLocationOnScreen.x
-        val popupY = inputLocationOnScreen.y - popupHeight - 10 // 10px gap for better spacing
-        
-        completionPopup?.showInScreenCoordinates(inputArea, Point(popupX, popupY))
+    private fun showCompletionPopup(state: Any) {
+        // This method is no longer used as ChatInputBar handles its own completion
     }
     
     private fun applySelectedCompletion() {
-        val state = currentCompletionState ?: return
-        val selectedIndex = completionList.selectedIndex
-        if (selectedIndex >= 0 && selectedIndex < state.items.size) {
-            applyCompletion(state, selectedIndex)
-        }
+        // This method is no longer used as ChatInputBar handles its own completion
     }
     
-    private fun applyCompletion(state: CompletionState, selectedIndex: Int) {
-        if (selectedIndex < 0 || selectedIndex >= state.items.size) return
-        
-        val selectedItem = state.items[selectedIndex]
-        val currentText = inputArea.text
-        val triggerPos = state.triggerPosition
-        
-        val newText = when (selectedItem) {
-            is com.claudecodechat.completion.CompletionItem.SlashCommand -> {
-                val beforeTrigger = currentText.substring(0, triggerPos)
-                val afterCursor = currentText.substring(inputArea.caretPosition)
-                val replacement = "/${selectedItem.name} "
-                beforeTrigger + replacement + afterCursor
-            }
-            is com.claudecodechat.completion.CompletionItem.FileReference -> {
-                val beforeTrigger = currentText.substring(0, triggerPos)
-                val afterCursor = currentText.substring(inputArea.caretPosition)
-                val replacement = "@${selectedItem.relativePath} "
-                beforeTrigger + replacement + afterCursor
-            }
-            else -> currentText
-        }
-        
-        inputArea.text = newText
-        inputArea.caretPosition = triggerPos + newText.substring(triggerPos).indexOf(' ') + 1
-        hideCompletion()
+    private fun applyCompletion(state: Any, selectedIndex: Int) {
+        // This method is no longer needed as ChatInputBar handles its own completion
     }
     
     
     private fun hideCompletion() {
-        completionPopup?.cancel()
-        completionPopup = null
-        currentCompletionState = null
-        completionManager.hideCompletion()
+        // This method is no longer used as ChatInputBar handles its own completion
     }
     
     private fun sendMessage() {
-        val message = inputArea.text.trim()
-        if (message.isEmpty()) return
-        
-        val selectedModel = modelComboBox.selectedItem as String
-        // If auto is selected, use empty string so CLI doesn't get model parameter
-        val modelToUse = if (selectedModel == "auto") "" else selectedModel
-        
-        // Clear input
-        inputArea.text = ""
-        hideCompletion()
-        
-        // Send through SessionViewModel
-        sessionViewModel.sendPrompt(message, modelToUse)
+        // This method is no longer needed as ChatInputBar handles sending
     }
     
     private fun updateChatDisplay(messages: List<ClaudeStreamMessage>) {
@@ -544,9 +212,12 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                     
                     messageComponent?.let {
                         messagesPanel.add(it)
-                        messagesPanel.add(Box.createVerticalStrut(0)) // No spacing
+                        messagesPanel.add(Box.createVerticalStrut(8)) // 适当的消息间距
                     }
                 }
+                
+                // 添加垂直胶水组件，将消息推到顶部，防止消息过少时过度拉伸
+                messagesPanel.add(Box.createVerticalGlue())
                 
                 // Refresh the display
                 messagesPanel.revalidate()
@@ -663,13 +334,17 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
      */
     private fun createMessageComponent(iconText: String, iconColor: Color, content: String, textColor: Color): JPanel {
         return JBPanel<JBPanel<*>>(BorderLayout()).apply {
-            border = JBUI.Borders.empty(0, 0, 0, 0) // No padding
+            border = JBUI.Borders.empty(4, 0, 4, 0) // 适量的内边距
             background = JBColor.background()
+            
+            // 设置最大高度以防止过度拉伸
+            maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
             
             // Icon area (left side) - fixed width, top aligned
             val iconPanel = JBPanel<JBPanel<*>>(BorderLayout()).apply {
                 background = JBColor.background()
                 preferredSize = Dimension(15, -1) // Narrower
+                maximumSize = Dimension(15, Int.MAX_VALUE)
                 
                 val iconLabel = JBLabel(iconText).apply {
                     foreground = iconColor
@@ -713,13 +388,17 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         val formattedDisplay = formatToolDisplay(toolName, inputString, toolResult)
         
         return JBPanel<JBPanel<*>>(BorderLayout()).apply {
-            border = JBUI.Borders.empty(2, 0, 2, 0) // Small top/bottom padding only
+            border = JBUI.Borders.empty(4, 0, 4, 0) // 适量的内边距
             background = JBColor.background()
+            
+            // 设置最大高度以防止过度拉伸
+            maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
             
             // Icon area (left side) - fixed width, top aligned  
             val iconPanel = JBPanel<JBPanel<*>>(BorderLayout()).apply {
                 background = JBColor.background()
                 preferredSize = Dimension(20, -1) // Fixed width
+                maximumSize = Dimension(20, Int.MAX_VALUE)
                 
                 val iconLabel = JBLabel("⏺").apply {
                     foreground = iconColor
@@ -834,15 +513,8 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
     }
     
     fun appendCodeToInput(code: String) {
-        val currentText = inputArea.text
-        val newText = if (currentText.isEmpty()) {
-            code
-        } else {
-            "$currentText\n\n$code"
-        }
-        inputArea.text = newText
-        inputArea.caretPosition = newText.length
-        inputArea.requestFocus()
+        chatInputBar.appendText(code)
+        chatInputBar.requestInputFocus()
     }
     
     private fun showSessionMenu() {
@@ -1212,30 +884,4 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         return "File edited"
     }
     
-    // Completion list cell renderer
-    private inner class CompletionListCellRenderer : DefaultListCellRenderer() {
-        override fun getListCellRendererComponent(
-            list: JList<*>?, value: Any?, index: Int, isSelected: Boolean, cellHasFocus: Boolean
-        ): Component {
-            val component = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
-            
-            // Get the actual completion item from currentCompletionState
-            currentCompletionState?.let { state ->
-                if (index >= 0 && index < state.items.size) {
-                    val item = state.items[index]
-                    text = when (item) {
-                        is com.claudecodechat.completion.CompletionItem.SlashCommand -> {
-                            "/${item.name} - ${item.description}"
-                        }
-                        is com.claudecodechat.completion.CompletionItem.FileReference -> {
-                            "@${item.relativePath}"
-                        }
-                        else -> value.toString()
-                    }
-                }
-            }
-            
-            return this
-        }
-    }
 }

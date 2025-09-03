@@ -34,6 +34,8 @@ class SessionViewModel(private val project: Project) : Disposable {
     private var currentThread: Thread? = null
     // Track if we're in follow mode (auto-scroll to new messages)
     private var followMode = true
+    // Track if user has manually selected a session (to prevent auto-resume conflicts)
+    private var userHasSelectedSession = false
     
     init {
         // Set up file watcher for real-time updates
@@ -42,24 +44,26 @@ class SessionViewModel(private val project: Project) : Disposable {
         // Register disposable
         Disposer.register(project, this)
         
-        // Auto-resume most recent session
+        // Auto-resume most recent session only if user hasn't manually selected one
         Thread {
             try {
-                Thread.sleep(500) // Small delay to ensure UI is ready
+                Thread.sleep(2000) // Longer delay to give user time to select a session
                 
-                // First try to get the most recent session from file system
-                val projectPath = project.basePath
-                if (projectPath != null) {
-                    val recentSessions = sessionHistoryLoader.getRecentSessionsWithDetails(projectPath, 1)
-                    if (recentSessions.isNotEmpty()) {
-                        val mostRecent = recentSessions.first()
-                        logger.info("Auto-resuming most recent session: ${mostRecent.id}")
-                        resumeSession(mostRecent.id)
-                    } else {
-                        // Fall back to persisted session ID
-                        sessionPersistence.getLastSessionId()?.let { sessionId ->
-                            logger.info("Auto-resuming persisted session: $sessionId")
-                            resumeSession(sessionId)
+                // Only auto-resume if user hasn't manually selected a session
+                if (!userHasSelectedSession) {
+                    val projectPath = project.basePath
+                    if (projectPath != null) {
+                        val recentSessions = sessionHistoryLoader.getRecentSessionsWithDetails(projectPath, 1)
+                        if (recentSessions.isNotEmpty()) {
+                            val mostRecent = recentSessions.first()
+                            logger.info("Auto-resuming most recent session: ${mostRecent.id}")
+                            resumeSession(mostRecent.id)
+                        } else {
+                            // Fall back to persisted session ID
+                            sessionPersistence.getLastSessionId()?.let { sessionId ->
+                                logger.info("Auto-resuming persisted session: $sessionId")
+                                resumeSession(sessionId)
+                            }
                         }
                     }
                 }
@@ -346,6 +350,7 @@ class SessionViewModel(private val project: Project) : Disposable {
      */
     fun startNewSession() {
         logger.info("Starting new session")
+        userHasSelectedSession = true // Mark that user has made a choice
         currentThread?.interrupt()
         _messages.value = emptyList()
         _currentSession.value = null
@@ -361,6 +366,7 @@ class SessionViewModel(private val project: Project) : Disposable {
      * Resume an existing session
      */
     fun resumeSession(sessionId: String) {
+        userHasSelectedSession = true // Mark that user has made a choice
         Thread {
             _isLoading.value = true
             try {
