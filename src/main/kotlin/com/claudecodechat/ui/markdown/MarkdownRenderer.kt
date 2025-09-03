@@ -1,5 +1,6 @@
 package com.claudecodechat.ui.markdown
 
+import com.claudecodechat.settings.ClaudeSettings
 import com.intellij.ui.JBColor
 import com.intellij.util.ui.JBUI
 import com.vladsch.flexmark.ast.Heading
@@ -54,11 +55,15 @@ object MarkdownRenderer {
         val colorBackground = "transparent"
         val baseFont = JBUI.Fonts.label()
         val fontFamily = baseFont.family
+        
+        // Get font size from settings
+        val fontSize = ClaudeSettings.getInstance().markdownFontSize
+        val codeFontSize = maxOf(fontSize - 1, 8) // Code font is 1px smaller, minimum 8px
 
         val css = """
             <style>
-              body { margin: 0; color: $colorForeground; background: $colorBackground; font-family: ${fontFamily}, sans-serif; font-size: 12px; }
-              pre, code { font-family: Menlo, Monaco, Consolas, monospace; font-size: 12px; }
+              body { margin: 0; color: $colorForeground; background: $colorBackground; font-family: ${fontFamily}, sans-serif; font-size: ${fontSize}px; }
+              pre, code { font-family: Menlo, Monaco, Consolas, monospace; font-size: ${codeFontSize}px; }
               /* 尽量使用 Swing 支持的 CSS 子集，避免解析异常 */
               pre { background-color: rgba(0,0,0,0.05); padding: 6px 8px; white-space: pre-wrap; margin: 0.25em 0; }
               code { background-color: rgba(0,0,0,0.06); padding: 1px 3px; }
@@ -116,13 +121,14 @@ object MarkdownRenderer {
 
     fun createComponent(markdown: String, config: MarkdownRenderConfig = MarkdownRenderConfig()): JPanel {
         val html = toHtml(markdown, config)
+        val fontSize = ClaudeSettings.getInstance().markdownFontSize
         val editor = object : JEditorPane("text/html", html) {
             override fun getScrollableTracksViewportWidth(): Boolean = true
         }.apply {
             isEditable = false
             isOpaque = false
             putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, true)
-            font = Font(Font.SANS_SERIF, Font.PLAIN, 12)  // 调整为12号字体
+            font = Font(Font.SANS_SERIF, Font.PLAIN, fontSize)  // 使用设置中的字体大小
         }
 
         return JPanel(BorderLayout()).apply {

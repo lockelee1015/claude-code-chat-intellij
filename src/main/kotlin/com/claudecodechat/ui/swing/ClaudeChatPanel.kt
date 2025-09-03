@@ -23,6 +23,7 @@ import com.intellij.ui.scale.JBUIScale
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
 import kotlinx.serialization.json.*
+import com.claudecodechat.ui.swing.renderers.ToolRendererFactory
 import java.awt.*
 import java.awt.event.*
 import javax.swing.*
@@ -166,7 +167,12 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                     val messageComponent = when (group.type) {
                         "user" -> createMessageComponent(">", secondaryTextColor(), group.content, secondaryTextColor())
                         "assistant" -> createMessageComponent("●", JBColor.foreground(), group.content, JBColor.foreground())
-                        "tool_interaction" -> createToolCard(group.toolUse, group.toolResult)
+                        "tool_interaction" -> ToolRendererFactory.createToolCard(
+                            group.toolUse?.name ?: "Unknown",
+                            group.toolUse?.input,
+                            group.toolResult?.content ?: group.toolResult?.text ?: "",
+                            group.toolResult?.isError == true
+                        )
                         "error" -> createMessageComponent("●", Color.decode("#FF6B6B"), group.content, Color.decode("#FF6B6B"))
                         else -> null
                     }

@@ -13,6 +13,7 @@ import com.intellij.util.xmlb.XmlSerializerUtil
 class ClaudeSettings : PersistentStateComponent<ClaudeSettings> {
     var claudePath: String = ""
     var environmentVariables: String = ""
+    var markdownFontSize: Int = 11  // Default markdown font size
     
     companion object {
         fun getInstance(): ClaudeSettings {

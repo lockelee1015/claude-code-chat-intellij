@@ -5,6 +5,7 @@ import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBTextField
 import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.components.JBScrollPane
+import com.intellij.ui.JBIntSpinner
 import com.intellij.util.ui.FormBuilder
 import javax.swing.JComponent
 import javax.swing.JPanel
@@ -27,7 +28,8 @@ class ClaudeSettingsConfigurable : Configurable {
         val component = settingsComponent ?: return false
         
         return component.claudePath != settings.claudePath ||
-                component.environmentVariables != settings.environmentVariables
+                component.environmentVariables != settings.environmentVariables ||
+                component.markdownFontSize != settings.markdownFontSize
     }
     
     override fun apply() {
@@ -36,6 +38,7 @@ class ClaudeSettingsConfigurable : Configurable {
         
         settings.claudePath = component.claudePath
         settings.environmentVariables = component.environmentVariables
+        settings.markdownFontSize = component.markdownFontSize
     }
     
     override fun reset() {
@@ -44,6 +47,7 @@ class ClaudeSettingsConfigurable : Configurable {
         
         component.claudePath = settings.claudePath
         component.environmentVariables = settings.environmentVariables
+        component.markdownFontSize = settings.markdownFontSize
     }
     
     override fun disposeUIResources() {
@@ -54,6 +58,7 @@ class ClaudeSettingsConfigurable : Configurable {
         val panel: JPanel
         private val claudePathField = JBTextField()
         private val environmentVariablesArea = JBTextArea(5, 40)
+        private val markdownFontSizeSpinner = JBIntSpinner(11, 8, 24)
         
         init {
             panel = FormBuilder.createFormBuilder()
@@ -71,6 +76,12 @@ class ClaudeSettingsConfigurable : Configurable {
                     1,
                     false
                 )
+                .addLabeledComponent(
+                    JBLabel("Markdown Font Size (8-24px):"),
+                    markdownFontSizeSpinner,
+                    1,
+                    false
+                )
                 .addComponentFillVertically(JPanel(), 0)
                 .panel
         }
@@ -85,6 +96,12 @@ class ClaudeSettingsConfigurable : Configurable {
             get() = environmentVariablesArea.text
             set(value) {
                 environmentVariablesArea.text = value
+            }
+        
+        var markdownFontSize: Int
+            get() = markdownFontSizeSpinner.number
+            set(value) {
+                markdownFontSizeSpinner.number = value
             }
     }
 }
