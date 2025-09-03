@@ -144,16 +144,16 @@ class ChatInputBar(
             preferredSize = Dimension(600, 100)
             verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
             horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
-            border = JBUI.Borders.customLine(JBColor.border(), 1)
+            border = createRoundedBorder(JBColor.border(), 1, 8)
         }
         
         // Add focus listener to change border color
         inputArea.addFocusListener(object : java.awt.event.FocusListener {
             override fun focusGained(e: java.awt.event.FocusEvent?) {
-                inputScroll.border = JBUI.Borders.customLine(JBColor.BLUE, 2)
+                inputScroll.border = createRoundedBorder(JBColor.BLUE, 2, 8)
             }
             override fun focusLost(e: java.awt.event.FocusEvent?) {
-                inputScroll.border = JBUI.Borders.customLine(JBColor.border(), 1)
+                inputScroll.border = createRoundedBorder(JBColor.border(), 1, 8)
             }
         })
 
@@ -181,6 +181,35 @@ class ChatInputBar(
         sendButton.addActionListener { sendMessage() }
         observeCompletion()
         setupFileInfoTracking()
+    }
+    
+    /**
+     * Create a rounded border
+     */
+    private fun createRoundedBorder(color: Color, thickness: Int, radius: Int): javax.swing.border.Border {
+        return object : javax.swing.border.AbstractBorder() {
+            override fun paintBorder(c: Component, g: Graphics, x: Int, y: Int, width: Int, height: Int) {
+                val g2 = g.create() as Graphics2D
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                g2.color = color
+                g2.stroke = BasicStroke(thickness.toFloat())
+                
+                // Draw rounded rectangle
+                g2.drawRoundRect(
+                    x + thickness / 2, 
+                    y + thickness / 2, 
+                    width - thickness, 
+                    height - thickness, 
+                    radius, 
+                    radius
+                )
+                g2.dispose()
+            }
+            
+            override fun getBorderInsets(c: Component): Insets {
+                return Insets(thickness + 2, thickness + 2, thickness + 2, thickness + 2)
+            }
+        }
     }
 
     fun requestInputFocus() { inputArea.requestFocus() }

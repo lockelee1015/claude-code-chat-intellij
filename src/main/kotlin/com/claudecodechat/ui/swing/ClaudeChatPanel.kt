@@ -308,7 +308,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                 
                 val iconLabel = JBLabel(iconText).apply {
                     foreground = iconColor
-                    font = Font(Font.SANS_SERIF, Font.BOLD, 14)  // 增大字体从11到14
+                    font = Font(Font.SANS_SERIF, Font.BOLD, 12)  // 调整为12号字体
                     horizontalAlignment = SwingConstants.LEFT
                     verticalAlignment = SwingConstants.TOP
                 }
@@ -362,7 +362,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                 
                 val iconLabel = JBLabel("⏺").apply {
                     foreground = iconColor
-                    font = Font(Font.SANS_SERIF, Font.BOLD, 16)  // 绿色工具图标稍大一些
+                    font = Font(Font.SANS_SERIF, Font.BOLD, 12)  // 与消息图标保持一致
                     horizontalAlignment = SwingConstants.LEFT
                     verticalAlignment = SwingConstants.TOP // Top align the icon
                 }
@@ -411,9 +411,9 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                     // First line (tool name) should be bold
                     val isBold = index == 0 && !line.startsWith("⎿")
                     val font = if (isBold) {
-                        Font(Font.SANS_SERIF, Font.BOLD, 14)  // 增大字体从12到14
+                        Font(Font.SANS_SERIF, Font.BOLD, 12)  // 调整为12号字体
                     } else {
-                        Font(Font.SANS_SERIF, Font.PLAIN, 14)  // 增大字体从12到14
+                        Font(Font.SANS_SERIF, Font.PLAIN, 12)  // 调整为12号字体
                     }
                     
                     // Check if this line contains "show more" for bash output
@@ -455,9 +455,9 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                     // First line (tool name) should be bold
                     val isBold = index == 0 && !line.startsWith("⎿")
                     val font = if (isBold) {
-                        Font(Font.SANS_SERIF, Font.BOLD, 14)  // 增大字体从12到14
+                        Font(Font.SANS_SERIF, Font.BOLD, 12)  // 调整为12号字体
                     } else {
-                        Font(Font.SANS_SERIF, Font.PLAIN, 14)  // 增大字体从12到14
+                        Font(Font.SANS_SERIF, Font.PLAIN, 12)  // 调整为12号字体
                     }
                     
                     // Check if this line contains "show more" for bash output
