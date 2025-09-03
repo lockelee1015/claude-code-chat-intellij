@@ -108,6 +108,11 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
             
             override fun contentRemoved(event: ContentManagerEvent) {
                 saveTabState(project, toolWindow)
+                
+                // If last tab was removed, show welcome page
+                if (toolWindow.contentManager.contentCount == 0) {
+                    addWelcomeContent(project, toolWindow)
+                }
             }
         })
     }

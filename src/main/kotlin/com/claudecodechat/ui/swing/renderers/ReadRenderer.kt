@@ -65,6 +65,9 @@ class ReadRenderer : ToolRenderer() {
             
             // Set smaller height
             preferredSize = Dimension(-1, 35)
+            
+            // Disable scrolling by default, enable on click
+            ScrollControlUtil.disableScrollingByDefault(this)
         }
     }
     
@@ -81,10 +84,14 @@ class ReadRenderer : ToolRenderer() {
         
         return JPanel(BorderLayout()).apply {
             background = JBColor.background()
-            add(JBScrollPane(errorContent).apply {
+            val scrollPane = JBScrollPane(errorContent).apply {
                 preferredSize = Dimension(-1, 120)
                 border = JBUI.Borders.empty()
-            }, BorderLayout.CENTER)
+            }
+            add(scrollPane, BorderLayout.CENTER)
+            
+            // Disable scrolling by default, enable on click
+            ScrollControlUtil.disableScrollingByDefault(scrollPane)
         }
     }
 }

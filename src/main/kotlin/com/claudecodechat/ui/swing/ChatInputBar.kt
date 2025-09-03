@@ -398,14 +398,31 @@ class ChatInputBar(
             val editor = fem.selectedTextEditor
             if (editor != null) {
                 val vf = editor.virtualFile
-                val line = editor.caretModel.logicalPosition.line + 1
-                val relativePath = if (vf != null) {
-                    com.intellij.openapi.vfs.VfsUtilCore.getRelativePath(vf, project.baseDir ?: vf) ?: vf.name
-                } else ""
-                val text = if (relativePath.isNotEmpty()) "current file: $relativePath | line: $line" else ""
-                ApplicationManager.getApplication().invokeLater {
-                    currentFileLabel.text = text
-                    currentFileLabel.isVisible = text.isNotEmpty()
+                if (vf != null) {
+                    val fileName = vf.name
+                    val line = editor.caretModel.logicalPosition.line + 1
+                    
+                    // Check if there's a selection
+                    val selectionModel = editor.selectionModel
+                    val hasSelection = selectionModel.hasSelection()
+                    
+                    val text = if (hasSelection) {
+                        val startLine = editor.offsetToLogicalPosition(selectionModel.selectionStart).line + 1
+                        val endLine = editor.offsetToLogicalPosition(selectionModel.selectionEnd).line + 1
+                        "in $fileName,select lines:$startLine-$endLine"
+                    } else {
+                        "in $fileName"
+                    }
+                    
+                    ApplicationManager.getApplication().invokeLater {
+                        currentFileLabel.text = text
+                        currentFileLabel.isVisible = true
+                    }
+                } else {
+                    ApplicationManager.getApplication().invokeLater {
+                        currentFileLabel.text = ""
+                        currentFileLabel.isVisible = false
+                    }
                 }
             } else {
                 ApplicationManager.getApplication().invokeLater {

@@ -15,7 +15,11 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.awt.*
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
+import javax.swing.JComponent
 import javax.swing.JPanel
+import javax.swing.JScrollPane
 import javax.swing.JTextArea
 
 /**
@@ -74,7 +78,7 @@ class BashRenderer : ToolRenderer() {
                 }
             }
             
-            // Wrap console component
+            // Wrap console component with scroll control
             JPanel(BorderLayout()).apply {
                 background = JBColor.background()
                 add(consoleView.component, BorderLayout.CENTER)
@@ -82,6 +86,9 @@ class BashRenderer : ToolRenderer() {
                 
                 // Store console reference for cleanup
                 putClientProperty("consoleView", consoleView)
+                
+                // Disable scrolling by default, enable on click
+                ScrollControlUtil.disableScrollingByDefault(consoleView.component)
             }
             
         } catch (e: Exception) {
@@ -132,7 +139,7 @@ class BashRenderer : ToolRenderer() {
     private fun createErrorPanel(errorOutput: String, command: String): JPanel {
         val errorContent = JTextArea().apply {
             foreground = Color(220, 38, 38) // Red for errors
-            background = Color(45, 21, 21) // Dark red background
+            background = JBColor.background() // Use standard background color
             font = Font(Font.MONOSPACED, Font.PLAIN, 11)
             isEditable = false
             lineWrap = false
@@ -148,10 +155,14 @@ class BashRenderer : ToolRenderer() {
         
         return JPanel(BorderLayout()).apply {
             background = JBColor.background()
-            add(JBScrollPane(errorContent).apply {
+            val scrollPane = JBScrollPane(errorContent).apply {
                 preferredSize = Dimension(-1, 150)
                 border = JBUI.Borders.empty()
-            }, BorderLayout.CENTER)
+            }
+            add(scrollPane, BorderLayout.CENTER)
+            
+            // Disable scrolling by default, enable on click
+            ScrollControlUtil.disableScrollingByDefault(scrollPane)
         }
     }
     
@@ -179,10 +190,16 @@ class BashRenderer : ToolRenderer() {
         
         return JPanel(BorderLayout()).apply {
             background = JBColor.background()
-            add(JBScrollPane(shellContent).apply {
+            val scrollPane = JBScrollPane(shellContent).apply {
                 preferredSize = Dimension(-1, 150)
                 border = JBUI.Borders.empty()
-            }, BorderLayout.CENTER)
+            }
+            add(scrollPane, BorderLayout.CENTER)
+            
+            // Disable scrolling by default, enable on click
+            ScrollControlUtil.disableScrollingByDefault(scrollPane)
         }
     }
+    
+
 }

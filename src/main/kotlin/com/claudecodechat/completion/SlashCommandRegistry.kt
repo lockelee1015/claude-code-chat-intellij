@@ -22,17 +22,8 @@ class SlashCommandRegistry(private val project: Project) {
                 description = "Clear conversation history"
             ),
             CompletionItem.SlashCommand(
-                name = "model",
-                description = "Select or change the AI model",
-                argumentHint = "[model-name]"
-            ),
-            CompletionItem.SlashCommand(
                 name = "cost",
                 description = "Show token usage statistics"
-            ),
-            CompletionItem.SlashCommand(
-                name = "config",
-                description = "View/modify configuration"
             ),
             CompletionItem.SlashCommand(
                 name = "review",
@@ -52,10 +43,6 @@ class SlashCommandRegistry(private val project: Project) {
                 description = "View account and system statuses"
             ),
             CompletionItem.SlashCommand(
-                name = "vim",
-                description = "Enter vim mode for alternating insert and command modes"
-            ),
-            CompletionItem.SlashCommand(
                 name = "compact",
                 description = "Compact conversation with optional focus instructions",
                 argumentHint = "[instructions]"
@@ -70,36 +57,16 @@ class SlashCommandRegistry(private val project: Project) {
                 description = "Manage custom AI subagents for specialized tasks"
             ),
             CompletionItem.SlashCommand(
-                name = "bug",
-                description = "Report bugs (sends conversation to Anthropic)"
-            ),
-            CompletionItem.SlashCommand(
                 name = "doctor",
                 description = "Checks the health of your Claude Code installation"
-            ),
-            CompletionItem.SlashCommand(
-                name = "login",
-                description = "Switch Anthropic accounts"
-            ),
-            CompletionItem.SlashCommand(
-                name = "logout",
-                description = "Sign out from your Anthropic account"
             ),
             CompletionItem.SlashCommand(
                 name = "mcp",
                 description = "Manage MCP server connections and OAuth authentication"
             ),
             CompletionItem.SlashCommand(
-                name = "permissions",
-                description = "View or update permissions"
-            ),
-            CompletionItem.SlashCommand(
                 name = "pr_comments",
                 description = "View pull request comments"
-            ),
-            CompletionItem.SlashCommand(
-                name = "terminal-setup",
-                description = "Install Shift+Enter key binding for newlines"
             )
         )
     }

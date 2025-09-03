@@ -11,6 +11,7 @@ import com.intellij.openapi.editor.markup.HighlighterLayer
 import com.intellij.openapi.editor.markup.MarkupModel
 import com.intellij.openapi.editor.markup.RangeHighlighter
 import com.intellij.openapi.editor.markup.TextAttributes
+import com.intellij.openapi.editor.ScrollType
 import com.intellij.openapi.fileTypes.FileType
 import com.intellij.openapi.fileTypes.FileTypeManager
 import com.intellij.openapi.project.Project
@@ -35,7 +36,7 @@ import javax.swing.SwingConstants
 class EditRenderer : ToolRenderer() {
     
     override fun canHandle(toolName: String): Boolean {
-        return toolName.lowercase() in listOf("edit", "search_replace", "multiedit", "write")
+        return toolName.lowercase() in listOf("edit", "search_replace", "multiedit")
     }
     
     override fun extractDisplayParameters(toolInput: JsonElement?): String {
@@ -123,8 +124,16 @@ class EditRenderer : ToolRenderer() {
             // Configure editor settings
             configureEditor(editor)
             
-            // Add diff highlighting
-            addDiffHighlighting(editor, oldText, newText)
+            // Add diff highlighting and get modified line offsets
+            val modifiedLineOffsets = addDiffHighlighting(editor, oldText, newText)
+
+            // Auto-scroll to first modified line
+            if (modifiedLineOffsets.isNotEmpty()) {
+                val firstModifiedOffset = modifiedLineOffsets.first()
+                val lineNumber = editor.document.getLineNumber(firstModifiedOffset)
+                editor.caretModel.moveToOffset(firstModifiedOffset)
+                editor.scrollingModel.scrollToCaret(ScrollType.CENTER)
+            }
             
             // Wrap editor component
             JPanel(BorderLayout()).apply {
@@ -133,6 +142,9 @@ class EditRenderer : ToolRenderer() {
                 
                 // Store editor reference for cleanup
                 putClientProperty("editor", editor)
+                
+                // Disable scrolling by default, enable on click
+                ScrollControlUtil.disableScrollingByDefault(editor.component)
             }
             
         } catch (e: Exception) {
@@ -142,9 +154,10 @@ class EditRenderer : ToolRenderer() {
     }
     
     /**
-     * Add diff highlighting to editor
+     * Add diff highlighting to editor and return offsets of modified lines
      */
-    private fun addDiffHighlighting(editor: Editor, oldText: String, newText: String) {
+    private fun addDiffHighlighting(editor: Editor, oldText: String, newText: String): List<Int> {
+        val modifiedOffsets = mutableListOf<Int>()
         try {
             val oldLines = oldText.split("\n")
             val newLines = newText.split("\n")
@@ -163,6 +176,7 @@ class EditRenderer : ToolRenderer() {
                     i >= oldLines.size -> {
                         val lineEndOffset = currentOffset + newLine.length
                         highlightLine(markupModel, currentOffset, lineEndOffset, true) // Green for added
+                        modifiedOffsets.add(currentOffset)
                     }
                     // Line was deleted (exists in old but not new) - skip highlighting since it's not in new text
                     i >= newLines.size -> {
@@ -172,6 +186,7 @@ class EditRenderer : ToolRenderer() {
                     oldLine != newLine -> {
                         val lineEndOffset = currentOffset + newLine.length
                         highlightLine(markupModel, currentOffset, lineEndOffset, true) // Green for modified
+                        modifiedOffsets.add(currentOffset)
                     }
                     // Line unchanged - no highlighting needed
                 }
@@ -183,6 +198,7 @@ class EditRenderer : ToolRenderer() {
         } catch (e: Exception) {
             // Ignore highlighting errors
         }
+        return mutableListOf<Int>()
     }
     
     /**
@@ -241,7 +257,6 @@ class EditRenderer : ToolRenderer() {
             border = JBUI.Borders.empty(8)
             
             val summaryText = when (editInfo.operationType) {
-                "write" -> "Created new file"
                 "multiedit" -> "Applied ${editInfo.editCount} edits"
                 else -> "File modified"
             }
@@ -277,16 +292,30 @@ class EditRenderer : ToolRenderer() {
             }
             
             add(scrollPane, BorderLayout.CENTER)
+            
+            // Disable scrolling by default, enable on click
+            ScrollControlUtil.disableScrollingByDefault(scrollPane)
         }
     }
     
     /**
-     * Show full diff in separate window
+     * Show full diff in separate window using virtual file
      */
     private fun showFullDiff(oldText: String, newText: String, filePath: String) {
         val project = ProjectManager.getInstance().openProjects.firstOrNull() ?: return
         
         try {
+            // Create virtual file with the new content for immediate viewing
+            if (newText.isNotEmpty()) {
+                val fileName = if (filePath.isNotEmpty()) filePath.substringAfterLast("/") else "ModifiedFile.txt"
+                val fileType = getFileType(filePath)
+                val virtualFile = com.intellij.testFramework.LightVirtualFile(fileName, fileType, newText)
+                
+                // Open the modified file in editor
+                com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project).openFile(virtualFile, true)
+            }
+            
+            // Also show diff window for comparison
             val diffRequest = SimpleDiffRequest(
                 "File Changes: ${filePath.substringAfterLast("/")}",
                 DiffContentFactory.getInstance().create(oldText),

@@ -18,7 +18,7 @@ class ClaudeSettings : PersistentStateComponent<ClaudeSettings> {
     companion object {
         fun getInstance(): ClaudeSettings {
             return ApplicationManager.getApplication()
-                .getService(ClaudeSettings::class.java)
+                .getService(ClaudeSettings::class.java) ?: ClaudeSettings()
         }
     }
     

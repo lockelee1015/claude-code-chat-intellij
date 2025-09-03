@@ -121,29 +121,54 @@ class ToolCardRenderer {
             
             add(titlePanel, BorderLayout.WEST)
             
-            // Add Show Diff link for Edit tools
-            if (toolName.lowercase() in listOf("edit", "multiedit", "write")) {
-                val diffLink = JBLabel("Show Diff").apply {
-                    foreground = JBColor.namedColor("Link.activeForeground", JBColor(0x589df6, 0x548af7)) // IntelliJ 默认链接颜色
-                    font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
-                    cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-                    border = JBUI.Borders.empty(0, 8)
-                    
-                    addMouseListener(object : MouseAdapter() {
-                        override fun mouseClicked(e: MouseEvent) {
-                            showFullDiffForEdit(toolInput)
-                        }
+            // Add Show Diff/Content link for Edit and Write tools
+            when (toolName.lowercase()) {
+                in listOf("edit", "multiedit") -> {
+                    val diffLink = JBLabel("Show Diff").apply {
+                        foreground = JBColor.namedColor("Link.activeForeground", JBColor(0x589df6, 0x548af7))
+                        font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
+                        cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                        border = JBUI.Borders.empty(0, 8)
                         
-                        override fun mouseEntered(e: MouseEvent) {
-                            foreground = JBColor.namedColor("Link.hoverForeground", JBColor(0x4a90e2, 0x6ba7f5))
-                        }
-                        
-                        override fun mouseExited(e: MouseEvent) {
-                            foreground = JBColor.namedColor("Link.activeForeground", JBColor(0x589df6, 0x548af7))
-                        }
-                    })
+                        addMouseListener(object : MouseAdapter() {
+                            override fun mouseClicked(e: MouseEvent) {
+                                showFullDiffForEdit(toolInput)
+                            }
+                            
+                            override fun mouseEntered(e: MouseEvent) {
+                                foreground = JBColor.namedColor("Link.hoverForeground", JBColor(0x4a90e2, 0x6ba7f5))
+                            }
+                            
+                            override fun mouseExited(e: MouseEvent) {
+                                foreground = JBColor.namedColor("Link.activeForeground", JBColor(0x589df6, 0x548af7))
+                            }
+                        })
+                    }
+                    add(diffLink, BorderLayout.EAST)
                 }
-                add(diffLink, BorderLayout.EAST)
+                "write" -> {
+                    val contentLink = JBLabel("Show Content").apply {
+                        foreground = JBColor.namedColor("Link.activeForeground", JBColor(0x589df6, 0x548af7))
+                        font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
+                        cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                        border = JBUI.Borders.empty(0, 8)
+                        
+                        addMouseListener(object : MouseAdapter() {
+                            override fun mouseClicked(e: MouseEvent) {
+                                showContentForWrite(toolInput)
+                            }
+                            
+                            override fun mouseEntered(e: MouseEvent) {
+                                foreground = JBColor.namedColor("Link.hoverForeground", JBColor(0x4a90e2, 0x6ba7f5))
+                            }
+                            
+                            override fun mouseExited(e: MouseEvent) {
+                                foreground = JBColor.namedColor("Link.activeForeground", JBColor(0x589df6, 0x548af7))
+                            }
+                        })
+                    }
+                    add(contentLink, BorderLayout.EAST)
+                }
             }
         }
     }
@@ -248,6 +273,30 @@ class ToolCardRenderer {
             }
         } catch (e: Exception) {
             // Ignore errors in diff display
+        }
+    }
+    
+    /**
+     * Show content for Write tools using virtual file
+     */
+    private fun showContentForWrite(toolInput: JsonElement?) {
+        try {
+            if (toolInput is JsonObject) {
+                val filePath = toolInput["file_path"]?.jsonPrimitive?.content ?: ""
+                val content = toolInput["contents"]?.jsonPrimitive?.content ?: ""
+                
+                if (content.isNotEmpty()) {
+                    // Try to get file type for syntax highlighting
+                    val fileType = com.intellij.openapi.fileTypes.FileTypeManager.getInstance()
+                        .getFileTypeByFileName(filePath.substringAfterLast("/"))
+                    
+                    // Use WriteRenderer to show content in editor
+                    val writeRenderer = WriteRenderer()
+                    writeRenderer.showContentInEditor(filePath, content, fileType)
+                }
+            }
+        } catch (e: Exception) {
+            // Ignore errors in content display
         }
     }
 }

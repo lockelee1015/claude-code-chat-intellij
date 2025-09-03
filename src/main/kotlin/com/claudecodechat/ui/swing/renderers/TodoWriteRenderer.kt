@@ -61,14 +61,6 @@ class TodoWriteRenderer : ToolRenderer() {
             border = JBUI.Borders.empty(8)
         }
         
-        // Add header
-        val headerLabel = JBLabel("Todos have been modified successfully.").apply {
-            foreground = JBColor.foreground()
-            font = Font(Font.MONOSPACED, Font.PLAIN, 11)
-            alignmentX = Component.LEFT_ALIGNMENT
-        }
-        panel.add(headerLabel)
-        panel.add(Box.createVerticalStrut(8))
         
         try {
             if (input is JsonObject) {

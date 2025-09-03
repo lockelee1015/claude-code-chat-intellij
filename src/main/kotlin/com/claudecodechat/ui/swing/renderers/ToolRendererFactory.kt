@@ -10,6 +10,7 @@ object ToolRendererFactory {
         BashRenderer(),
         ReadRenderer(),
         EditRenderer(),
+        WriteRenderer(),
         // Add more specific renderers here
         GenericRenderer() // Always keep generic as last fallback
     )
