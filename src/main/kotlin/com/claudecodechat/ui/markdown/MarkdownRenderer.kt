@@ -57,8 +57,8 @@ object MarkdownRenderer {
 
         val css = """
             <style>
-              body { margin: 0; color: $colorForeground; background: $colorBackground; font-family: ${fontFamily}, sans-serif; font-size: 1em; }
-              pre, code { font-family: Menlo, Monaco, Consolas, monospace; font-size: 1em; }
+              body { margin: 0; color: $colorForeground; background: $colorBackground; font-family: ${fontFamily}, sans-serif; font-size: 14px; }
+              pre, code { font-family: Menlo, Monaco, Consolas, monospace; font-size: 14px; }
               /* 尽量使用 Swing 支持的 CSS 子集，避免解析异常 */
               pre { background-color: rgba(0,0,0,0.05); padding: 6px 8px; white-space: pre-wrap; margin: 0.25em 0; }
               code { background-color: rgba(0,0,0,0.06); padding: 1px 3px; }
@@ -122,7 +122,7 @@ object MarkdownRenderer {
             isEditable = false
             isOpaque = false
             putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, true)
-            font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
+            font = Font(Font.SANS_SERIF, Font.PLAIN, 14)  // 增大字体以匹配工具输出
         }
 
         return JPanel(BorderLayout()).apply {

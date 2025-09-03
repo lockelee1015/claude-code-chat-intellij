@@ -174,7 +174,7 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
         welcomePanel.border = JBUI.Borders.empty(20, 20, 20, 20)
         
         val title = JLabel("Welcome to Claude Chat")
-        title.font = java.awt.Font(java.awt.Font.SANS_SERIF, java.awt.Font.BOLD, 16)
+        title.font = java.awt.Font(java.awt.Font.SANS_SERIF, java.awt.Font.BOLD, 14)
         title.alignmentX = Component.CENTER_ALIGNMENT
         
         val subtitle = JLabel("Start chatting or browse session history using the buttons above")

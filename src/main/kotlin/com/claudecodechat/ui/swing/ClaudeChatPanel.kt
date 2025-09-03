@@ -32,8 +32,7 @@ import com.claudecodechat.ui.markdown.MarkdownRenderConfig
 
 class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>() {
     private val sessionViewModel = SessionViewModel.getInstance(project)
-    private val settings = ClaudeSettings.getInstance()
-    
+
     // UI Components
     private val messagesPanel: JPanel
     private val chatScrollPane: JScrollPane
@@ -75,19 +74,14 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
             border = JBUI.Borders.empty()
         }
     }
-    
-    
-    
-    
-    
+
     private fun createSessionTabs(): JBTabbedPane {
         val tabs = JBTabbedPane()
         tabs.font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
         // No-op: tabs replaced by toolwindow tabs. Keep method for compatibility if needed.
         return tabs
     }
-    
-    
+
     private fun createChatInputBar(): ChatInputBar {
         return ChatInputBar(
             project = project,
@@ -100,12 +94,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
             }
         )
     }
-    
-    
-    
-    
 
-    
     private fun setupLayout() {
         // Top toolbar
         val toolbarPanel = JBPanel<JBPanel<*>>(BorderLayout()).apply {
@@ -139,10 +128,6 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         // File info tracking is now handled by ChatInputBar
     }
     
-    private fun updateCurrentFileInfo() {
-        // This method is no longer used as ChatInputBar handles file info tracking
-    }
-    
     private fun observeViewModel() {
         scope.launch {
             sessionViewModel.messages.collect { messages ->
@@ -166,44 +151,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
     private fun loadInitialData() {
         // Load any initial data if needed
     }
-    
-    private fun handleInputKeyPress(e: KeyEvent) {
-        // This method is no longer needed as ChatInputBar handles key events
-    }
-    
-    private fun handleInputKeyRelease(e: KeyEvent) {
-        // This method is no longer needed as ChatInputBar handles key events
-    }
-    
-    private fun updateCompletion() {
-        // This method is no longer used as ChatInputBar handles its own completion
-    }
-    
-    private fun handleCompletionState(state: Any) {
-        // This method is no longer used as ChatInputBar handles its own completion
-    }
-    
-    private fun showCompletionPopup(state: Any) {
-        // This method is no longer used as ChatInputBar handles its own completion
-    }
-    
-    private fun applySelectedCompletion() {
-        // This method is no longer used as ChatInputBar handles its own completion
-    }
-    
-    private fun applyCompletion(state: Any, selectedIndex: Int) {
-        // This method is no longer needed as ChatInputBar handles its own completion
-    }
-    
-    
-    private fun hideCompletion() {
-        // This method is no longer used as ChatInputBar handles its own completion
-    }
-    
-    private fun sendMessage() {
-        // This method is no longer needed as ChatInputBar handles sending
-    }
-    
+
     private fun updateChatDisplay(messages: List<ClaudeStreamMessage>) {
         ApplicationManager.getApplication().invokeLater {
             // Clear existing messages
@@ -355,12 +303,12 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
             // Icon area (left side) - fixed width, top aligned
             val iconPanel = JBPanel<JBPanel<*>>(BorderLayout()).apply {
                 background = JBColor.background()
-                preferredSize = Dimension(15, -1) // Narrower
-                maximumSize = Dimension(15, Int.MAX_VALUE)
+                preferredSize = Dimension(20, -1) // 统一宽度与工具图标一致
+                maximumSize = Dimension(20, Int.MAX_VALUE)
                 
                 val iconLabel = JBLabel(iconText).apply {
                     foreground = iconColor
-                    font = Font(Font.SANS_SERIF, Font.BOLD, 11)
+                    font = Font(Font.SANS_SERIF, Font.BOLD, 14)  // 增大字体从11到14
                     horizontalAlignment = SwingConstants.LEFT
                     verticalAlignment = SwingConstants.TOP
                 }
@@ -414,7 +362,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                 
                 val iconLabel = JBLabel("⏺").apply {
                     foreground = iconColor
-                    font = Font(Font.SANS_SERIF, Font.BOLD, 12)
+                    font = Font(Font.SANS_SERIF, Font.BOLD, 16)  // 绿色工具图标稍大一些
                     horizontalAlignment = SwingConstants.LEFT
                     verticalAlignment = SwingConstants.TOP // Top align the icon
                 }
@@ -423,7 +371,8 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
             add(iconPanel, BorderLayout.WEST)
             
             // Tool content area (right side) with wrapping
-            val contentArea = createWrappingToolContentArea(formattedDisplay, JBColor.foreground())
+            val originalContent = toolResult?.content ?: toolResult?.text ?: ""
+            val contentArea = createWrappingToolContentAreaWithExpansion(formattedDisplay, JBColor.foreground(), toolName, originalContent)
             add(contentArea, BorderLayout.CENTER)
         }
     }
@@ -448,10 +397,47 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
     }
     
     /**
-     * Create content area for message text (legacy - kept for compatibility)
+     * Create content area for tool display with automatic wrapping and expansion support
      */
-    private fun createContentArea(content: String, textColor: Color): JPanel {
-        return createWrappingContentArea(content, textColor)
+    private fun createWrappingToolContentAreaWithExpansion(content: String, textColor: Color, toolName: String, originalContent: String): JPanel {
+        return JBPanel<JBPanel<*>>().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            background = JBColor.background()
+            border = JBUI.Borders.empty()
+            
+            val lines = content.split("\\n")
+            for ((index, line) in lines.withIndex()) {
+                if (line.isNotBlank()) {
+                    // First line (tool name) should be bold
+                    val isBold = index == 0 && !line.startsWith("⎿")
+                    val font = if (isBold) {
+                        Font(Font.SANS_SERIF, Font.BOLD, 14)  // 增大字体从12到14
+                    } else {
+                        Font(Font.SANS_SERIF, Font.PLAIN, 14)  // 增大字体从12到14
+                    }
+                    
+                    // Check if this line contains "show more" for bash output
+                    if (line.contains("(show more)")) {
+                        val textComponent = createExpandableTextComponentForTool(line, textColor, font, toolName, originalContent)
+                        add(textComponent)
+                    } else {
+                        // Use JTextArea for each line to enable wrapping
+                        val textArea = JTextArea(line).apply {
+                            foreground = textColor
+                            background = JBColor.background()
+                            this.font = font
+                            isEditable = false
+                            isOpaque = false
+                            lineWrap = true
+                            wrapStyleWord = true
+                            border = null
+                            alignmentX = LEFT_ALIGNMENT
+                        }
+                        add(textArea)
+                    }
+                }
+            }
+        }
     }
     
     /**
@@ -469,12 +455,215 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                     // First line (tool name) should be bold
                     val isBold = index == 0 && !line.startsWith("⎿")
                     val font = if (isBold) {
-                        Font(Font.SANS_SERIF, Font.BOLD, 12)
+                        Font(Font.SANS_SERIF, Font.BOLD, 14)  // 增大字体从12到14
                     } else {
-                        Font(Font.SANS_SERIF, Font.PLAIN, 12)
+                        Font(Font.SANS_SERIF, Font.PLAIN, 14)  // 增大字体从12到14
                     }
                     
-                    // Use JTextArea for each line to enable wrapping
+                    // Check if this line contains "show more" for bash output
+                    if (line.contains("(show more)")) {
+                        val textComponent = createExpandableTextComponent(line, textColor, font, content)
+                        add(textComponent)
+                    } else {
+                        // Use JTextArea for each line to enable wrapping
+                        val textArea = JTextArea(line).apply {
+                            foreground = textColor
+                            background = JBColor.background()
+                            this.font = font
+                            isEditable = false
+                            isOpaque = false
+                            lineWrap = true
+                            wrapStyleWord = true
+                            border = null
+                            alignmentX = LEFT_ALIGNMENT
+                        }
+                        add(textArea)
+                    }
+                }
+            }
+        }
+    }
+    
+    /**
+     * Create an expandable text component for "show more" functionality in tool output
+     */
+    private fun createExpandableTextComponentForTool(line: String, textColor: Color, font: Font, toolName: String, originalContent: String): JPanel {
+        val containerPanel = JBPanel<JBPanel<*>>()
+        containerPanel.layout = BoxLayout(containerPanel, BoxLayout.Y_AXIS)
+        containerPanel.background = JBColor.background()
+        containerPanel.border = JBUI.Borders.empty()
+        
+        val mainText = line.substringBefore("(show more)")
+        val showMoreText = "(show more)"
+        
+        // Create main text area
+        val textArea = JTextArea(mainText).apply {
+            foreground = textColor
+            background = JBColor.background()
+            this.font = font
+            isEditable = false
+            isOpaque = false
+            lineWrap = true
+            wrapStyleWord = true
+            border = null
+            alignmentX = Component.LEFT_ALIGNMENT
+        }
+        
+        // Create clickable "show more" link
+        val showMoreLabel = JBLabel(showMoreText).apply {
+            foreground = Color.decode("#3498db") // 蓝色链接颜色
+            this.font = font
+            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+            alignmentX = Component.LEFT_ALIGNMENT
+            
+            addMouseListener(object : MouseAdapter() {
+                override fun mouseClicked(e: MouseEvent) {
+                    expandToolContent(containerPanel, toolName, originalContent, textColor, font)
+                }
+                
+                override fun mouseEntered(e: MouseEvent) {
+                    foreground = Color.decode("#2980b9") // 深蓝色悬停效果
+                }
+                
+                override fun mouseExited(e: MouseEvent) {
+                    foreground = Color.decode("#3498db")
+                }
+            })
+        }
+        
+        // Add text and link to container
+        containerPanel.add(textArea)
+        containerPanel.add(showMoreLabel)
+        
+        return containerPanel
+    }
+    
+    /**
+     * Create an expandable text component for "show more" functionality
+     */
+    private fun createExpandableTextComponent(line: String, textColor: Color, font: Font, fullContent: String): JPanel {
+        val containerPanel = JBPanel<JBPanel<*>>()
+        containerPanel.layout = BoxLayout(containerPanel, BoxLayout.Y_AXIS)
+        containerPanel.background = JBColor.background()
+        containerPanel.border = JBUI.Borders.empty()
+        
+        val mainText = line.substringBefore("(show more)")
+        val showMoreText = "(show more)"
+        
+        // Create main text area
+        val textArea = JTextArea(mainText).apply {
+            foreground = textColor
+            background = JBColor.background()
+            this.font = font
+            isEditable = false
+            isOpaque = false
+            lineWrap = true
+            wrapStyleWord = true
+            border = null
+            alignmentX = Component.LEFT_ALIGNMENT
+        }
+        
+        // Create clickable "show more" link
+        val showMoreLabel = JBLabel(showMoreText).apply {
+            foreground = Color.decode("#3498db") // 蓝色链接颜色
+            this.font = font
+            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+            alignmentX = Component.LEFT_ALIGNMENT
+            
+            addMouseListener(object : MouseAdapter() {
+                override fun mouseClicked(e: MouseEvent) {
+                    expandContent(containerPanel, fullContent, textColor, font)
+                }
+                
+                override fun mouseEntered(e: MouseEvent) {
+                    foreground = Color.decode("#2980b9") // 深蓝色悬停效果
+                }
+                
+                override fun mouseExited(e: MouseEvent) {
+                    foreground = Color.decode("#3498db")
+                }
+            })
+        }
+        
+        // Add text and link to container
+        containerPanel.add(textArea)
+        containerPanel.add(showMoreLabel)
+        
+        return containerPanel
+    }
+    
+    /**
+     * Expand the tool content to show full output
+     */
+    private fun expandToolContent(container: JPanel, toolName: String, originalContent: String, textColor: Color, font: Font) {
+        val lines = originalContent.trim().split("\n").filter { it.isNotBlank() }
+        
+        container.removeAll()
+        container.layout = BoxLayout(container, BoxLayout.Y_AXIS)
+        
+        // Add all lines with proper indentation (5 spaces to align with ⎿ content)
+        for ((index, line) in lines.withIndex()) {
+            val indentedLine = if (index == 0) line else "     $line"  // 5 spaces to align with ⎿ symbol
+            
+            val textArea = JTextArea(indentedLine).apply {
+                foreground = textColor
+                background = JBColor.background()
+                this.font = font
+                isEditable = false
+                isOpaque = false
+                lineWrap = true
+                wrapStyleWord = true
+                border = null
+                alignmentX = Component.LEFT_ALIGNMENT
+            }
+            container.add(textArea)
+        }
+        
+        // Add collapse link
+        val collapseLabel = JBLabel("(show less)").apply {
+            foreground = Color.decode("#3498db") // 蓝色链接颜色
+            this.font = font
+            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+            alignmentX = Component.LEFT_ALIGNMENT
+            
+            addMouseListener(object : MouseAdapter() {
+                override fun mouseClicked(e: MouseEvent) {
+                    collapseToolContent(container, toolName, originalContent, textColor, font)
+                }
+                
+                override fun mouseEntered(e: MouseEvent) {
+                    foreground = Color.decode("#2980b9") // 深蓝色悬停效果
+                }
+                
+                override fun mouseExited(e: MouseEvent) {
+                    foreground = Color.decode("#3498db")
+                }
+            })
+        }
+        container.add(collapseLabel)
+        
+        container.revalidate()
+        container.repaint()
+    }
+    
+    /**
+     * Collapse the tool content back to summary view
+     */
+    private fun collapseToolContent(container: JPanel, toolName: String, originalContent: String, textColor: Color, font: Font) {
+        // Recreate the original collapsed format
+        val formattedSummary = formatBashResult(originalContent)
+        
+        container.removeAll()
+        container.layout = BoxLayout(container, BoxLayout.Y_AXIS)
+        
+        val lines = formattedSummary.split("\\n")
+        for ((index, line) in lines.withIndex()) {
+            if (line.isNotBlank()) {
+                // Check if this line contains "show more" for bash output
+                if (line.contains("(show more)")) {
+                    val textComponent = createExpandableTextComponentForTool(line, textColor, font, toolName, originalContent)
+                    container.add(textComponent)
+                } else {
                     val textArea = JTextArea(line).apply {
                         foreground = textColor
                         background = JBColor.background()
@@ -486,17 +675,53 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                         border = null
                         alignmentX = Component.LEFT_ALIGNMENT
                     }
-                    add(textArea)
+                    container.add(textArea)
                 }
             }
         }
+        
+        container.revalidate()
+        container.repaint()
     }
     
     /**
-     * Create content area for tool display (legacy - kept for compatibility)
+     * Expand the content to show full output
      */
-    private fun createToolContentArea(content: String, textColor: Color): JPanel {
-        return createWrappingToolContentArea(content, textColor)
+    private fun expandContent(container: JPanel, fullContent: String, textColor: Color, font: Font) {
+        // Get the original tool result content from the formatted display
+        val toolResultContent = extractOriginalBashContent(fullContent)
+        val lines = toolResultContent.trim().split("\n").filter { it.isNotBlank() }
+        
+        container.removeAll()
+        container.layout = BoxLayout(container, BoxLayout.Y_AXIS)
+        
+        // Add all lines
+        for (line in lines) {
+            val textArea = JTextArea(line).apply {
+                foreground = textColor
+                background = JBColor.background()
+                this.font = font
+                isEditable = false
+                isOpaque = false
+                lineWrap = true
+                wrapStyleWord = true
+                border = null
+                alignmentX = Component.LEFT_ALIGNMENT
+            }
+            container.add(textArea)
+        }
+        
+        container.revalidate()
+        container.repaint()
+    }
+    
+    /**
+     * Extract original bash content from the full content string
+     */
+    private fun extractOriginalBashContent(fullContent: String): String {
+        // This would need to be passed the original tool result content
+        // For now, we'll reconstruct it from the formatted display
+        return fullContent
     }
     
     private fun formatToolDisplay(toolName: String, input: String, toolResult: com.claudecodechat.models.Content?): String {
@@ -528,74 +753,6 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         chatInputBar.appendText(code)
         chatInputBar.requestInputFocus()
     }
-    
-    private fun showSessionMenu() {
-        val projectPath = project.basePath
-        val options = mutableListOf<SessionMenuItem>()
-        options.add(SessionMenuItem(label = "Start New Session", type = SessionMenuType.NEW))
-        
-        // Recent sessions (from file system)
-        try {
-            if (projectPath != null) {
-                val recent = com.claudecodechat.session.SessionHistoryLoader()
-                    .getRecentSessionsWithDetails(projectPath, 10)
-                if (recent.isNotEmpty()) {
-                    options.add(SessionMenuItem(label = "— Recent —", type = SessionMenuType.SEPARATOR))
-                    recent.forEach { info ->
-                        val preview = info.preview?.replace('\n', ' ')
-                        val display = if (!preview.isNullOrBlank()) {
-                            "${info.id.take(8)}  ·  ${preview.take(60)}"
-                        } else {
-                            info.id.take(8)
-                        }
-                        options.add(SessionMenuItem(label = display, type = SessionMenuType.RESUME, sessionId = info.id))
-                    }
-                }
-            }
-        } catch (_: Exception) { }
-        
-        // Fallback to persisted list if needed
-        try {
-            val persisted = com.claudecodechat.persistence.SessionPersistence.getInstance(project).getRecentSessionIds()
-            if (persisted.isNotEmpty()) {
-                if (options.none { it.type == SessionMenuType.RESUME }) {
-                    options.add(SessionMenuItem(label = "— Recent —", type = SessionMenuType.SEPARATOR))
-                }
-                persisted.take(10).forEach { id ->
-                    if (options.none { it.sessionId == id }) {
-                        options.add(SessionMenuItem(label = id.take(8), type = SessionMenuType.RESUME, sessionId = id))
-                    }
-                }
-            }
-        } catch (_: Exception) { }
-        
-        if (options.isEmpty()) {
-            options.add(SessionMenuItem(label = "Start New Session", type = SessionMenuType.NEW))
-        }
-        
-        val popup = JBPopupFactory.getInstance()
-            .createPopupChooserBuilder(options)
-            .setTitle("Sessions")
-            .setRenderer(object : DefaultListCellRenderer() {
-                override fun getListCellRendererComponent(list: JList<*>, value: Any?, index: Int, isSelected: Boolean, cellHasFocus: Boolean): Component {
-                    val c = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus) as JLabel
-                    val item = value as SessionMenuItem
-                    c.text = item.label
-                    c.isEnabled = item.type != SessionMenuType.SEPARATOR
-                    return c
-                }
-            })
-            .setItemChosenCallback { item ->
-                when (item.type) {
-                    SessionMenuType.NEW -> sessionViewModel.startNewSession()
-                    SessionMenuType.RESUME -> item.sessionId?.let { sessionViewModel.resumeSession(it) }
-                    SessionMenuType.SEPARATOR -> {}
-                }
-            }
-            .createPopup()
-        
-        popup.showUnderneathOf(sessionTabs)
-    }
 
     private data class SessionMenuItem(
         val label: String,
@@ -609,30 +766,6 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         val plus = JPanel()
         plus.isOpaque = false
         tabs.addTab("+", plus)
-    }
-
-    private fun addOrUpdateActiveSessionTab(tabs: JBTabbedPane, title: String?, id: String?) {
-        // Real tabs are all except the last plus tab
-        val count = tabs.tabCount
-        val realCount = if (count == 0) 0 else count - 1
-        val displayTitle = (title ?: "test").take(40)
-        val secondary = secondaryTextColor()
-        val idHtml = if (id != null) " <span style='color: rgb(${secondary.red},${secondary.green},${secondary.blue});'>(${id.take(8)})</span>" else ""
-        val htmlTitle = "<html>$displayTitle$idHtml</html>"
-        if (realCount == 0) {
-            val panel = JPanel()
-            panel.isOpaque = false
-            panel.putClientProperty("sessionId", id)
-            tabs.insertTab(htmlTitle, null, panel, id ?: displayTitle, 0)
-            if (tabs.tabCount == 1) addPlusTab(tabs)
-            tabs.selectedIndex = 0
-        } else {
-            val comp = tabs.getComponentAt(0) as? JComponent
-            comp?.putClientProperty("sessionId", id)
-            tabs.setTitleAt(0, htmlTitle)
-            tabs.setToolTipTextAt(0, id ?: displayTitle)
-            tabs.selectedIndex = 0
-        }
     }
 
     private fun addSessionTab(tabs: JBTabbedPane, title: String?, id: String?) {
@@ -653,52 +786,6 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         }
     }
 
-    private fun showSessionAddChooser(tabs: JBTabbedPane) {
-        val projectPath = project.basePath
-        val options = mutableListOf<SessionMenuItem>()
-        options.add(SessionMenuItem(label = "Start New Session", type = SessionMenuType.NEW))
-        try {
-            if (projectPath != null) {
-                val recent = com.claudecodechat.session.SessionHistoryLoader()
-                    .getRecentSessionsWithDetails(projectPath, 15)
-                if (recent.isNotEmpty()) {
-                    options.add(SessionMenuItem(label = "— Recent —", type = SessionMenuType.SEPARATOR))
-                    recent.forEach { info ->
-                        val preview = info.preview?.replace('\n', ' ')
-                        val display = if (!preview.isNullOrBlank()) {
-                            "${info.id.take(8)}  ·  ${preview.take(60)}"
-                        } else {
-                            info.id.take(8)
-                        }
-                        options.add(SessionMenuItem(label = display, type = SessionMenuType.RESUME, sessionId = info.id))
-                    }
-                }
-            }
-        } catch (_: Exception) { }
-
-        val popup = JBPopupFactory.getInstance()
-            .createPopupChooserBuilder(options)
-            .setTitle("Add Session Tab")
-            .setRenderer(object : DefaultListCellRenderer() {
-                override fun getListCellRendererComponent(list: JList<*>, value: Any?, index: Int, isSelected: Boolean, cellHasFocus: Boolean): Component {
-                    val c = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus) as JLabel
-                    val item = value as SessionMenuItem
-                    c.text = item.label
-                    c.isEnabled = item.type != SessionMenuType.SEPARATOR
-                    return c
-                }
-            })
-            .setItemChosenCallback { item ->
-                when (item.type) {
-                    SessionMenuType.NEW -> addSessionTab(tabs, title = "(new session)", id = null)
-                    SessionMenuType.RESUME -> addSessionTab(tabs, title = null, id = item.sessionId)
-                    SessionMenuType.SEPARATOR -> {}
-                }
-            }
-            .createPopup()
-        popup.showUnderneathOf(sessionTabs)
-    }
-    
     private fun extractToolParameters(toolName: String, input: String): String {
         if (input.isEmpty()) return ""
         
@@ -809,12 +896,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                 formatEditResult(content)
             }
             "bash" -> {
-                val lines = content.trim().split("\n")
-                if (lines.size <= 3 && content.length <= 100) {
-                    content.trim()
-                } else {
-                    "Command executed (${lines.size} lines output)"
-                }
+                formatBashResult(content)
             }
             "grep" -> {
                 if (content.startsWith("Found")) {
@@ -894,6 +976,28 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         }
         
         return "File edited"
+    }
+    
+    private fun formatBashResult(content: String): String {
+        val lines = content.trim().split("\n").filter { it.isNotBlank() }
+        
+        return when {
+            lines.isEmpty() -> "Command executed"
+            lines.size <= 3 -> {
+                // For 3 or fewer lines, indent all lines properly (5 spaces to align with content after ⎿  )
+                lines.mapIndexed { index, line ->
+                    if (index == 0) line else "     $line"
+                }.joinToString("\n")
+            }
+            else -> {
+                val visibleLines = lines.take(3)
+                val remainingCount = lines.size - 3
+                val formattedLines = visibleLines.mapIndexed { index, line ->
+                    if (index == 0) line else "     $line"
+                }.joinToString("\n")
+                "$formattedLines\n… +$remainingCount lines (show more)"
+            }
+        }
     }
     
 }
