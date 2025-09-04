@@ -13,9 +13,6 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import kotlinx.coroutines.flow.*
-import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.application.runInEdt
-import com.intellij.openapi.application.invokeLater
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.util.Disposer
 
@@ -198,12 +195,15 @@ class SessionViewModel(private val project: Project) : Disposable {
                 updateMetrics { it.copy(promptsSent = it.promptsSent + 1) }
                 
                 // Prepare execution options
+                val currentSessionId = _currentSession.value?.sessionId
+                logger.info("Sending prompt with session management: sessionId=$currentSessionId, resume=${currentSessionId != null}")
+                
                 val options = ClaudeCliService.ExecuteOptions(
                     prompt = prompt,
                     model = model,
-                    sessionId = _currentSession.value?.sessionId,
-                    resume = false,
-                    continueSession = _currentSession.value != null,
+                    sessionId = currentSessionId,
+                    resume = currentSessionId != null, // 如果有 sessionId 就使用 resume
+                    continueSession = false, // 不使用 -c，而是明确指定 session
                     verbose = true,
                     skipPermissions = true
                 )
@@ -240,6 +240,7 @@ class SessionViewModel(private val project: Project) : Disposable {
      * Handle incoming stream message
      */
     private fun handleStreamMessage(message: ClaudeStreamMessage) {
+        logger.info("Handling message type: ${message.type}, subtype: ${message.subtype}")
         // Extract session info first if available
         if (message.type == MessageType.SYSTEM && 
             message.subtype == "init" && 
@@ -259,6 +260,26 @@ class SessionViewModel(private val project: Project) : Disposable {
         if (message.type == MessageType.SYSTEM && message.subtype == "complete") {
             logger.info("Received completion signal, setting loading to false")
             _isLoading.value = false
+            
+            // Check if this completion message has usage data
+            message.message?.usage?.let { usage ->
+                logger.info("Completion message usage: input=${usage.inputTokens}, output=${usage.outputTokens}")
+                updateMetrics { metrics ->
+                    val newInput = metrics.totalInputTokens + usage.inputTokens
+                    val newOutput = metrics.totalOutputTokens + usage.outputTokens
+                    val newCacheRead = metrics.cacheReadInputTokens + (usage.cacheReadInputTokens ?: 0)
+                    val newCacheCreation = metrics.cacheCreationInputTokens + (usage.cacheCreationInputTokens ?: 0)
+                    logger.info("Updating metrics from completion: totalInput=$newInput, totalOutput=$newOutput")
+                    metrics.copy(
+                        totalInputTokens = newInput,
+                        totalOutputTokens = newOutput,
+                        cacheReadInputTokens = newCacheRead,
+                        cacheCreationInputTokens = newCacheCreation
+                    )
+                }
+            } ?: run {
+                logger.info("No usage data found in completion message. Message content: ${message.message}")
+            }
             return
         }
         
@@ -284,11 +305,41 @@ class SessionViewModel(private val project: Project) : Disposable {
         message.message?.let { msg ->
             // Update token usage
             msg.usage?.let { usage ->
+                logger.info("Token usage detected: input=${usage.inputTokens}, output=${usage.outputTokens}, cacheRead=${usage.cacheReadInputTokens}, cacheCreation=${usage.cacheCreationInputTokens}")
                 updateMetrics { metrics ->
+                    val newInput = metrics.totalInputTokens + usage.inputTokens
+                    val newOutput = metrics.totalOutputTokens + usage.outputTokens
+                    val newCacheRead = metrics.cacheReadInputTokens + (usage.cacheReadInputTokens ?: 0)
+                    val newCacheCreation = metrics.cacheCreationInputTokens + (usage.cacheCreationInputTokens ?: 0)
+                    logger.info("Updating metrics: totalInput=$newInput, totalOutput=$newOutput, cacheRead=$newCacheRead, cacheCreation=$newCacheCreation")
                     metrics.copy(
-                        totalInputTokens = metrics.totalInputTokens + usage.inputTokens,
-                        totalOutputTokens = metrics.totalOutputTokens + usage.outputTokens
+                        totalInputTokens = newInput,
+                        totalOutputTokens = newOutput,
+                        cacheReadInputTokens = newCacheRead,
+                        cacheCreationInputTokens = newCacheCreation
                     )
+                }
+            } ?: run {
+                // Debug: log when no usage data is found
+                logger.info("No usage data found in message type: ${message.type}, subtype: ${message.subtype}")
+                
+                // Fallback: estimate tokens for text messages if no usage data available
+                if (message.type == MessageType.ASSISTANT || message.type == MessageType.USER) {
+                    msg.content.forEach { content ->
+                        if (content.type == com.claudecodechat.models.ContentType.TEXT && content.text != null) {
+                            val estimatedTokens = estimateTokens(content.text)
+                            if (estimatedTokens > 0) {
+                                logger.info("Estimated ${estimatedTokens} tokens for ${message.type} message")
+                                updateMetrics { metrics ->
+                                    if (message.type == MessageType.USER) {
+                                        metrics.copy(totalInputTokens = metrics.totalInputTokens + estimatedTokens)
+                                    } else {
+                                        metrics.copy(totalOutputTokens = metrics.totalOutputTokens + estimatedTokens)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
             
@@ -428,6 +479,8 @@ class SessionViewModel(private val project: Project) : Disposable {
     private fun updateMetricsFromMessages(messages: List<ClaudeStreamMessage>) {
         var inputTokens = 0
         var outputTokens = 0
+        var cacheReadTokens = 0
+        var cacheCreationTokens = 0
         var toolsExecuted = 0
         var filesCreated = 0
         var filesModified = 0
@@ -438,6 +491,24 @@ class SessionViewModel(private val project: Project) : Disposable {
                 msg.usage?.let { usage ->
                     inputTokens += usage.inputTokens
                     outputTokens += usage.outputTokens
+                    cacheReadTokens += usage.cacheReadInputTokens ?: 0
+                    cacheCreationTokens += usage.cacheCreationInputTokens ?: 0
+                } ?: run {
+                    // Fallback: estimate tokens for text messages if no usage data available
+                    if (message.type == MessageType.USER || message.type == MessageType.ASSISTANT) {
+                        msg.content.forEach { content ->
+                            if (content.type == com.claudecodechat.models.ContentType.TEXT && content.text != null) {
+                                val estimatedTokens = estimateTokens(content.text)
+                                if (estimatedTokens > 0) {
+                                    if (message.type == MessageType.USER) {
+                                        inputTokens += estimatedTokens
+                                    } else {
+                                        outputTokens += estimatedTokens
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 
                 // Count tools
@@ -463,6 +534,8 @@ class SessionViewModel(private val project: Project) : Disposable {
         _sessionMetrics.value = SessionMetrics(
             totalInputTokens = inputTokens,
             totalOutputTokens = outputTokens,
+            cacheReadInputTokens = cacheReadTokens,
+            cacheCreationInputTokens = cacheCreationTokens,
             toolsExecuted = toolsExecuted,
             filesCreated = filesCreated,
             filesModified = filesModified,
@@ -589,12 +662,6 @@ class SessionViewModel(private val project: Project) : Disposable {
         _sessionMetrics.value = update(_sessionMetrics.value)
     }
     
-    fun getErrors(): List<String> = errorList.toList()
-    
-    fun clearErrors() {
-        errorList.clear()
-    }
-    
     fun stopCurrentRequest() {
         logger.info("Stopping current request")
         currentThread?.interrupt()
@@ -606,18 +673,27 @@ class SessionViewModel(private val project: Project) : Disposable {
         _isLoading.value = false
         logger.info("Request stopped, loading state set to false")
     }
-    
-    /**
-     * Set follow mode (auto-scroll to new messages)
-     */
-    fun setFollowMode(enabled: Boolean) {
-        followMode = enabled
-    }
-    
-    fun isFollowMode(): Boolean = followMode
-    
+
     override fun dispose() {
         currentThread?.interrupt()
         // File watcher will be disposed automatically as it's registered with Disposer
+    }
+    
+    /**
+     * Simple token estimation based on word count and characters
+     * Rough approximation: ~0.75 tokens per word or ~4 characters per token
+     */
+    private fun estimateTokens(text: String): Int {
+        if (text.isBlank()) return 0
+        
+        // Method 1: Word-based estimation (more accurate for English)
+        val wordCount = text.split("\\s+").count { it.isNotBlank() }
+        val wordBasedEstimate = (wordCount * 0.75).toInt()
+        
+        // Method 2: Character-based estimation (more universal)
+        val charBasedEstimate = (text.length / 4.0).toInt()
+        
+        // Use the higher estimate to be conservative
+        return maxOf(wordBasedEstimate, charBasedEstimate, 1)
     }
 }

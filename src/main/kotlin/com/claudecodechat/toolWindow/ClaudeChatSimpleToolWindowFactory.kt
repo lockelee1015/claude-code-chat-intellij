@@ -4,6 +4,7 @@ import com.claudecodechat.ui.swing.ClaudeChatPanel
 import com.claudecodechat.state.SessionViewModel
 import com.claudecodechat.session.SessionHistoryLoader
 import com.claudecodechat.persistence.SessionPersistence
+import com.claudecodechat.models.ClaudeStreamMessage
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
 import com.intellij.openapi.project.DumbAware
@@ -107,6 +108,10 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
             }
             
             override fun contentRemoved(event: ContentManagerEvent) {
+                // Clean up message observer
+                val messageObserver = event.content?.getUserData(MESSAGE_OBSERVER_KEY)
+                messageObserver?.cancel()
+                
                 saveTabState(project, toolWindow)
                 
                 // If last tab was removed, show welcome page
@@ -122,6 +127,7 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
     companion object {
         private val CHAT_PANEL_KEY = Key.create<ClaudeChatPanel>("CHAT_PANEL")
         private val SESSION_ID_KEY = Key.create<String>("SESSION_ID")
+        private val MESSAGE_OBSERVER_KEY = Key.create<Job>("MESSAGE_OBSERVER")
     }
 
     private fun updateTabIcons(project: Project, toolWindow: ToolWindow) {
@@ -151,6 +157,19 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
         return if (t.length <= maxChars) t else t.substring(0, maxChars) + "…"
     }
 
+    private fun extractFirstUserMessageText(message: ClaudeStreamMessage): String {
+        return message.message?.content?.firstOrNull()?.text ?: ""
+    }
+
+    private fun createTitleSummary(text: String, maxWords: Int = 3): String {
+        val words = text.trim().split("\\s+".toRegex()).filter { it.isNotBlank() }
+        return if (words.size <= maxWords) {
+            words.joinToString(" ")
+        } else {
+            words.take(maxWords).joinToString(" ") + "…"
+        }
+    }
+
     private fun addChatContent(project: Project, toolWindow: ToolWindow, title: String, sessionId: String?): ClaudeChatPanel {
         val chatPanel = ClaudeChatPanel(project)
         val displayTitle = shortenTitle(title, 5) // Use shortened title
@@ -160,6 +179,25 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
         content.isCloseable = true
         toolWindow.contentManager.addContent(content)
         toolWindow.contentManager.setSelectedContent(content)
+
+        // Observe messages to update tab title with first user message
+        val messageObserver = CoroutineScope(Dispatchers.Main + SupervisorJob()).launch {
+            SessionViewModel.getInstance(project).messages.collect { messages ->
+                val firstUserMessage = messages.firstOrNull { 
+                    it.type.name == "USER" && it.message?.content?.isNotEmpty() == true
+                }
+                firstUserMessage?.let { message ->
+                    val userText = extractFirstUserMessageText(message)
+                    if (userText.isNotBlank()) {
+                        val summary = createTitleSummary(userText)
+                        content.displayName = summary
+                        // Save updated tab state
+                        saveTabState(project, toolWindow)
+                    }
+                }
+            }
+        }
+        content.putUserData(MESSAGE_OBSERVER_KEY, messageObserver)
 
         // If a session was chosen, resume it
         if (sessionId != null) {
@@ -171,10 +209,14 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
     }
 
     private fun addWelcomeContent(project: Project, toolWindow: ToolWindow) {
-        val panel = JPanel(java.awt.BorderLayout())
+        val panel = JPanel(java.awt.BorderLayout()).apply {
+            background = JBColor.background() // 设置主面板背景色以适应主题
+        }
         
         // Welcome message
-        val welcomePanel = JPanel()
+        val welcomePanel = JPanel().apply {
+            background = JBColor.background() // 设置欢迎面板背景色
+        }
         welcomePanel.layout = BoxLayout(welcomePanel, BoxLayout.Y_AXIS)
         welcomePanel.border = JBUI.Borders.empty(20, 20, 20, 20)
         
@@ -190,6 +232,29 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
         welcomePanel.add(title)
         welcomePanel.add(Box.createVerticalStrut(10))
         welcomePanel.add(subtitle)
+        welcomePanel.add(Box.createVerticalStrut(20))
+        
+        // Feature tips
+        val tipsPanel = JPanel().apply {
+            background = JBColor.background() // 设置提示面板背景色
+        }
+        tipsPanel.layout = BoxLayout(tipsPanel, BoxLayout.Y_AXIS)
+        tipsPanel.alignmentX = Component.CENTER_ALIGNMENT
+        
+        val tip1 = JLabel("💡 Use slash commands: /help, /clear, /cost, /review, /init")
+        tip1.font = java.awt.Font(java.awt.Font.SANS_SERIF, java.awt.Font.PLAIN, 11)
+        tip1.foreground = JBColor.GRAY
+        tip1.alignmentX = Component.CENTER_ALIGNMENT
+
+        val tip2 = JLabel("💡 Reference files: @filename to include file content in your prompt")
+        tip2.font = java.awt.Font(java.awt.Font.SANS_SERIF, java.awt.Font.PLAIN, 11)
+        tip2.foreground = JBColor.GRAY
+        tip2.alignmentX = Component.CENTER_ALIGNMENT
+
+        tipsPanel.add(tip1)
+        tipsPanel.add(Box.createVerticalStrut(4))
+        tipsPanel.add(tip2)
+        welcomePanel.add(tipsPanel)
         
         // Chat input at the bottom
         lateinit var welcomeContent: com.intellij.ui.content.Content
@@ -215,6 +280,7 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
             }
         )
         val inputPanel = JPanel(java.awt.BorderLayout()).apply {
+            background = JBColor.background() // 设置输入面板背景色
             border = com.intellij.util.ui.JBUI.Borders.empty(0, 10, 0, 10)
             add(inputBar, java.awt.BorderLayout.CENTER)
         }

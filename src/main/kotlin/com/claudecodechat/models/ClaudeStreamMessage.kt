@@ -116,6 +116,8 @@ data class SessionMetrics(
     var wasResumed: Boolean = false,
     val modelChanges: MutableList<String> = mutableListOf(),
     var totalInputTokens: Int = 0,
-    var totalOutputTokens: Int = 0
+    var totalOutputTokens: Int = 0,
+    var cacheReadInputTokens: Int = 0,
+    var cacheCreationInputTokens: Int = 0
 )
 

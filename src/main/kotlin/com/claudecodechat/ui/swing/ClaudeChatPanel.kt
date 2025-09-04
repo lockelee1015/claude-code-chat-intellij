@@ -46,6 +46,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
     
     init {
         layout = BorderLayout()
+        background = JBColor.background() // 设置主面板背景色以适应主题
         
         // Initialize UI components
         messagesPanel = createMessagesPanel()
@@ -63,8 +64,19 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
     private fun createMessagesPanel(): JPanel {
         return JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            background = JBColor.background()
+            background = getMessageAreaBackgroundColor() // 使用主题自适应背景色
             border = JBUI.Borders.empty(5, 10, 5, 10) // reduced padding
+        }
+    }
+    
+    /**
+     * 获取消息区域的主题自适应背景色
+     */
+    private fun getMessageAreaBackgroundColor(): Color {
+        return if (JBColor.isBright()) {
+            Color.WHITE // 明亮主题使用白色
+        } else {
+            Color(30, 30, 30) // 深色主题使用深灰色
         }
     }
     
@@ -74,6 +86,8 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
             verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
             horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
             border = JBUI.Borders.empty()
+            background = getMessageAreaBackgroundColor() // 使用主题自适应背景色
+            viewport.background = getMessageAreaBackgroundColor() // 确保视口背景也是主题色
         }
     }
     
@@ -98,30 +112,25 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
     }
     
     private fun setupLayout() {
-        // Top toolbar
-        val toolbarPanel = JBPanel<JBPanel<*>>(BorderLayout()).apply {
-            border = JBUI.Borders.empty(5)
-            val leftPanel = JBPanel<JBPanel<*>>(BorderLayout()).apply { /* removed in-tool tabs; kept placeholder for spacing */ }
-            val rightPanel = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.RIGHT)).apply { border = JBUI.Borders.empty() }
-            add(leftPanel, BorderLayout.WEST)
-            add(rightPanel, BorderLayout.EAST)
-        }
+        // Remove the unused toolbar since it's empty and causing top spacing
+        // val toolbarPanel = ... (removed to eliminate top spacing)
         
         // Main input area handled by ChatInputBar now
         
         // Input section: reuse shared ChatInputBar (with completion and file info)
         val inputSection = JBPanel<JBPanel<*>>(BorderLayout()).apply {
+            background = JBColor.background() // 输入区域背景色
             border = JBUI.Borders.empty(0, 10, 0, 10)
             add(chatInputBar, BorderLayout.CENTER)
         }
         
         // Center section (chat + completion)
         val centerSection = JBPanel<JBPanel<*>>(BorderLayout()).apply {
+            background = JBColor.background() // 中心区域背景色
             add(chatScrollPane, BorderLayout.CENTER)
         }
         
-        // Main layout
-        add(toolbarPanel, BorderLayout.NORTH)
+        // Main layout - no toolbar needed
         add(centerSection, BorderLayout.CENTER)
         add(inputSection, BorderLayout.SOUTH)
     }
@@ -142,6 +151,19 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                 if (!isLoading) {
                     chatInputBar.hideLoading()
                 }
+            }
+        }
+        
+        scope.launch {
+            sessionViewModel.sessionMetrics.collect { metrics ->
+                println("DEBUG: sessionMetrics collected - input=${metrics.totalInputTokens}, output=${metrics.totalOutputTokens}, cacheRead=${metrics.cacheReadInputTokens}, cacheCreation=${metrics.cacheCreationInputTokens}")
+                println("DEBUG: Metrics summary - total=${metrics.totalInputTokens + metrics.totalOutputTokens}, wasResumed=${metrics.wasResumed}")
+                chatInputBar.updateTokenUsage(
+                    metrics.totalInputTokens, 
+                    metrics.totalOutputTokens,
+                    metrics.cacheReadInputTokens,
+                    metrics.cacheCreationInputTokens
+                )
             }
         }
         
@@ -302,14 +324,14 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
     private fun createMessageComponent(iconText: String, iconColor: Color, content: String, textColor: Color): JPanel {
         return JBPanel<JBPanel<*>>(BorderLayout()).apply {
             border = JBUI.Borders.empty(4, 0, 4, 0) // 适量的内边距
-            background = JBColor.background()
+            background = getMessageAreaBackgroundColor() // 使用主题自适应背景色
             
             // 设置最大高度以防止过度拉伸
             maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
             
             // Icon area (left side) - fixed width, top aligned
             val iconPanel = JBPanel<JBPanel<*>>(BorderLayout()).apply {
-                background = JBColor.background()
+                background = getMessageAreaBackgroundColor() // 使用主题自适应背景色
                 preferredSize = Dimension(20, -1) // 统一宽度与工具图标一致
                 maximumSize = Dimension(20, Int.MAX_VALUE)
                 
@@ -366,6 +388,29 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
     }
     
     /**
+     * Get background color for tool cards with dark mode support
+     */
+    private fun getToolCardBackgroundColor(hasError: Boolean, isInProgress: Boolean): Color {
+        return when {
+            hasError -> if (JBColor.isBright()) {
+                Color(255, 235, 235, 180)     // 明亮模式：浅红色透明
+            } else {
+                Color(80, 30, 30, 180)        // 深色模式：深红色透明
+            }
+            isInProgress -> if (JBColor.isBright()) {
+                Color(235, 245, 255, 180)     // 明亮模式：浅蓝色透明
+            } else {
+                Color(30, 40, 80, 180)        // 深色模式：深蓝色透明
+            }
+            else -> if (JBColor.isBright()) {
+                Color(235, 255, 235, 180)     // 明亮模式：浅绿色透明
+            } else {
+                Color(40, 60, 40, 160)        // 深色模式：更低调的深绿色透明
+            }
+        }
+    }
+
+    /**
      * Create base tool card with consistent styling and status colors
      */
     private fun createBaseCard(title: String, hasError: Boolean = false, isInProgress: Boolean = false): JPanel {
@@ -374,13 +419,9 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
             background = JBColor.background()
             maximumSize = Dimension(Int.MAX_VALUE, 300) // Limit height
             
-            // Header with status color background
+            // Header with status color background with dark mode support
             val header = JBPanel<JBPanel<*>>(BorderLayout()).apply {
-                background = when {
-                    hasError -> Color(255, 235, 235, 180)     // 浅红色透明
-                    isInProgress -> Color(235, 245, 255, 180) // 浅蓝色透明
-                    else -> Color(235, 255, 235, 180)         // 浅绿色透明
-                }
+                background = getToolCardBackgroundColor(hasError, isInProgress)
                 border = JBUI.Borders.empty(8, 12)
                 
                 val titleLabel = JBLabel(title).apply {
@@ -887,7 +928,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
      */
     private fun createWrappingContentArea(content: String, textColor: Color): JPanel {
         return JBPanel<JBPanel<*>>(BorderLayout()).apply {
-            background = JBColor.background()
+            background = getMessageAreaBackgroundColor() // 使用主题自适应背景色
             border = JBUI.Borders.empty()
             val component = MarkdownRenderer.createComponent(
                 content,

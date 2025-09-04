@@ -46,11 +46,21 @@ class ChatInputBar(
     private val sendButton: JButton = JButton("Send (Ctrl+Enter)")
     private val currentFileLabel: JLabel = JLabel("")
     
+    // Context status bar
+    private val contextStatusBar: JBPanel<JBPanel<*>> = JBPanel(BorderLayout())
+    private val contextLabel: JLabel = JLabel("Context: Ready")
+    private val contextIcon: JLabel = JLabel(AllIcons.General.Information)
+    
     // Loading bar components
     private val loadingPanel: JBPanel<JBPanel<*>> = JBPanel(BorderLayout())
     private val loadingIcon: JLabel = JLabel(AnimatedIcon.Default.INSTANCE)
     private val loadingText: JLabel = JLabel("")
+    private val timerLabel: JLabel = JLabel("")
     private val stopButton: JButton = JButton("Stop")
+    
+    // Timer for tracking execution time
+    private var startTime: Long = 0
+    private var timerJob: Job? = null
 
     // Completion UI
     private val completionList: JList<String> = JList()
@@ -170,11 +180,24 @@ class ChatInputBar(
         val section = JBPanel<JBPanel<*>>(BorderLayout()).apply {
             border = JBUI.Borders.empty()
             add(loadingPanel, BorderLayout.NORTH)
-            add(inputScroll, BorderLayout.CENTER)
-            add(controls, BorderLayout.SOUTH)
+            add(contextStatusBar, BorderLayout.CENTER)
+            
+            // Create a container for input and controls
+            val inputContainer = JBPanel<JBPanel<*>>(BorderLayout()).apply {
+                add(inputScroll, BorderLayout.CENTER)
+                add(controls, BorderLayout.SOUTH)
+            }
+            add(inputContainer, BorderLayout.SOUTH)
         }
 
-        add(section, BorderLayout.CENTER)
+        // Setup context status bar
+        setupContextStatusBar()
+        
+        val mainPanel = JBPanel<JBPanel<*>>(BorderLayout()).apply {
+            add(section, BorderLayout.CENTER)
+        }
+        
+        add(mainPanel, BorderLayout.CENTER)
         // Don't add completion panel to layout - it will be a popup
 
         // Actions
@@ -212,6 +235,7 @@ class ChatInputBar(
         }
     }
 
+
     fun requestInputFocus() { inputArea.requestFocus() }
     fun setText(text: String) { inputArea.text = text }
     fun getText(): String = inputArea.text
@@ -223,10 +247,49 @@ class ChatInputBar(
         inputArea.caretPosition = inputArea.text.length
     }
     
+    /**
+     * Update the context information in the status bar
+     */
+    fun updateContextInfo(context: String) {
+        contextLabel.text = "Context: $context"
+    }
+    
+    /**
+     * Update token usage information in the status bar
+     */
+    fun updateTokenUsage(inputTokens: Int, outputTokens: Int, cacheReadTokens: Int = 0, cacheCreationTokens: Int = 0) {
+        val contextLength = inputTokens + cacheReadTokens + cacheCreationTokens
+        val totalTokens = contextLength + outputTokens
+        
+        // Format tokens with 'k' suffix for thousands, keeping one decimal place
+        fun formatTokens(tokens: Int): String {
+            return if (tokens >= 1000) "${String.format("%.1f", tokens / 1000.0)}k" else tokens.toString()
+        }
+        
+        val displayText = if (contextLength > 0 || outputTokens > 0) {
+            if (cacheReadTokens > 0 || cacheCreationTokens > 0) {
+                "Context: ${formatTokens(contextLength)} (${formatTokens(inputTokens)}↑ + ${formatTokens(cacheReadTokens)} cache read + ${formatTokens(cacheCreationTokens)} cache creation) | Output: ${formatTokens(outputTokens)}↓"
+            } else {
+                "Context: ${formatTokens(contextLength)} (${formatTokens(inputTokens)}↑) | Output: ${formatTokens(outputTokens)}↓"
+            }
+        } else {
+            "Context: Ready"
+        }
+        
+        println("DEBUG: updateTokenUsage called with input=$inputTokens, output=$outputTokens, cacheRead=$cacheReadTokens, cacheCreation=$cacheCreationTokens")
+        println("DEBUG: Setting context label text: $displayText")
+        contextLabel.text = displayText
+    }
+    
     // Loading state management
     fun showLoading(userPrompt: String) {
         val summary = createPromptSummary(userPrompt)
         loadingText.text = summary
+        
+        // Start timer
+        startTime = System.currentTimeMillis()
+        startTimer()
+        
         loadingPanel.isVisible = true
         sendButton.isEnabled = false
         revalidate()
@@ -234,10 +297,31 @@ class ChatInputBar(
     }
     
     fun hideLoading() {
+        // Stop timer
+        timerJob?.cancel()
+        timerJob = null
+        
         loadingPanel.isVisible = false
         sendButton.isEnabled = true
         revalidate()
         repaint()
+    }
+    
+    private fun startTimer() {
+        timerJob?.cancel()
+        timerJob = scope.launch {
+            while (isActive) {
+                val elapsed = System.currentTimeMillis() - startTime
+                val seconds = elapsed / 1000
+                val milliseconds = (elapsed % 1000) / 100
+                
+                ApplicationManager.getApplication().invokeLater {
+                    timerLabel.text = "${seconds}.${milliseconds}s"
+                }
+                
+                delay(100) // Update every 100ms
+            }
+        }
     }
     
     private fun createPromptSummary(prompt: String): String {
@@ -438,31 +522,82 @@ class ChatInputBar(
         }
     }
     
-    private fun setupLoadingPanel() {
-        // Configure loading components
-        loadingIcon.font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
-        loadingText.font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
-        loadingText.foreground = JBColor.foreground()
-        
-        stopButton.font = Font(Font.SANS_SERIF, Font.PLAIN, 11)
-        stopButton.preferredSize = Dimension(60, 24)
-        stopButton.addActionListener {
-            onStop?.invoke()
-            hideLoading()
+    private fun setupContextStatusBar() {
+        // Configure context status bar without background color
+        contextStatusBar.apply {
+            background = JBColor.background() // 使用原生背景色，无特殊背景
+            border = JBUI.Borders.empty(4, 8, 4, 8)
+            preferredSize = Dimension(Int.MAX_VALUE, 24)
         }
         
-        // Layout loading panel
-        loadingPanel.apply {
-            background = JBColor.background()
-            border = JBUI.Borders.empty(4, 8, 4, 8)
+        contextLabel.apply {
+            font = Font(Font.SANS_SERIF, Font.PLAIN, 11)
+            foreground = JBColor.foreground() // 使用标准前景色以确保可读性
+        }
+        
+        contextIcon.apply {
+            icon = AllIcons.General.Information
+            border = JBUI.Borders.empty(0, 0, 0, 6)
+        }
+        
+        val leftPanel = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, 5, 0)).apply {
+            background = JBColor.background() // 使用原生背景色
+            add(contextIcon)
+            add(contextLabel)
+        }
+        
+        contextStatusBar.add(leftPanel, BorderLayout.WEST)
+    }
+
+    private fun setupLoadingPanel() {
+        // Configure loading icon with animation
+        loadingIcon.apply {
+            icon = AnimatedIcon.Default.INSTANCE // 动态加载图标
+            border = JBUI.Borders.empty(0, 0, 0, 8)
+        }
+        
+        // Configure loading components
+        loadingText.apply {
+            font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
+            foreground = JBColor.foreground()
+        }
+        
+        // Configure timer label
+        timerLabel.apply {
+            font = Font(Font.SANS_SERIF, Font.PLAIN, 11)
+            foreground = JBColor.GRAY
+            border = JBUI.Borders.empty(0, 8, 0, 0)
+        }
+        
+        // Configure stop button with native styling
+        stopButton.apply {
+            font = Font(Font.SANS_SERIF, Font.PLAIN, 11)
+            preferredSize = Dimension(70, 28)
+            // 使用默认样式，不自定义颜色
             
-            val leftPanel = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, 5, 0)).apply {
+            addActionListener {
+                onStop?.invoke()
+                hideLoading()
+            }
+        }
+        
+        // Layout loading panel with proper height and border
+        loadingPanel.apply {
+            background = JBColor.background() // 使用原生背景色
+            border = JBUI.Borders.compound(
+                JBUI.Borders.customLine(JBColor.border(), 1), // 添加边框
+                JBUI.Borders.empty(8, 12, 8, 12) // 内边距
+            )
+            preferredSize = Dimension(Int.MAX_VALUE, 48) // 增加高度到 48px
+            
+            val leftPanel = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, 5, 6)).apply {
                 background = JBColor.background()
                 add(loadingIcon)
                 add(loadingText)
+                add(timerLabel)
             }
             
-            val rightPanel = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.RIGHT, 0, 0)).apply {
+            val rightPanel = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.RIGHT, 0, 6)).apply {
                 background = JBColor.background()
                 add(stopButton)
             }

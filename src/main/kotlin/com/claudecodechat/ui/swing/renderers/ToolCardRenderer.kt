@@ -214,15 +214,28 @@ class ToolCardRenderer {
     }
     
     /**
-     * Get background color based on tool status
+     * Get background color based on tool status with dark mode support
      */
     private fun getStatusBackgroundColor(status: ToolStatus): Color {
         return when (status) {
-            ToolStatus.ERROR -> Color(255, 235, 235, 180)     // 浅红色透明
-            ToolStatus.IN_PROGRESS -> Color(235, 245, 255, 180) // 浅蓝色透明
-            ToolStatus.SUCCESS -> Color(235, 255, 235, 180)     // 浅绿色透明
+            ToolStatus.ERROR -> if (JBColor.isBright()) {
+                Color(255, 235, 235, 180)     // 明亮模式：浅红色透明
+            } else {
+                Color(80, 30, 30, 180)        // 深色模式：深红色透明
+            }
+            ToolStatus.IN_PROGRESS -> if (JBColor.isBright()) {
+                Color(235, 245, 255, 180)     // 明亮模式：浅蓝色透明
+            } else {
+                Color(30, 40, 80, 180)        // 深色模式：深蓝色透明
+            }
+            ToolStatus.SUCCESS -> if (JBColor.isBright()) {
+                Color(235, 255, 235, 180)     // 明亮模式：浅绿色透明
+            } else {
+                Color(40, 60, 40, 160)        // 深色模式：更低调的深绿色透明
+            }
         }
     }
+    
     
     /**
      * Create rounded border for tool cards

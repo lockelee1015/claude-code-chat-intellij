@@ -64,23 +64,47 @@ class TodoWriteRenderer : ToolRenderer() {
         
         try {
             if (input is JsonObject) {
-                                        val todosArray = input["todos"] as? JsonArray
-                        if (todosArray != null) {
-                            for (todoElement in todosArray) {
-                                if (todoElement is JsonObject) {
-                                    val content = todoElement["content"]?.jsonPrimitive?.content ?: ""
-                                    val status = todoElement["status"]?.jsonPrimitive?.content ?: "pending"
-                                    val activeForm = todoElement["activeForm"]?.jsonPrimitive?.content
-                                    
-                                    if (content.isNotEmpty()) {
-                                        val isCurrentChange = activeForm != null && activeForm.isNotEmpty()
-                                        val todoItem = createTodoItemComponent(content, status, isCurrentChange)
-                                        todoItem.maximumSize = Dimension(Int.MAX_VALUE, todoItem.preferredSize.height)
-                                        panel.add(todoItem)
-                                        panel.add(Box.createVerticalStrut(4))
-                                    }
+                val todosArray = input["todos"] as? JsonArray
+                if (todosArray != null) {
+                    // Find the item that should be bolded: either in_progress or last completed
+                    var boldIndex = -1
+                    var lastCompletedIndex = -1
+                    val todosList = todosArray.mapIndexed { index, todoElement ->
+                        if (todoElement is JsonObject) {
+                            val content = todoElement["content"]?.jsonPrimitive?.content ?: ""
+                            val status = todoElement["status"]?.jsonPrimitive?.content ?: "pending"
+                            
+                            if (content.isNotEmpty()) {
+                                // Track in_progress items for immediate bolding
+                                if (status == "in_progress") {
+                                    boldIndex = index
                                 }
+                                // Track last completed item as fallback
+                                if (status == "completed" && lastCompletedIndex == -1) {
+                                    lastCompletedIndex = index
+                                }
+                                Pair(content, status)
+                            } else {
+                                null
                             }
+                        } else {
+                            null
+                        }
+                    }.filterNotNull()
+                    
+                    // If no in_progress item, use last completed item
+                    if (boldIndex == -1 && lastCompletedIndex != -1) {
+                        boldIndex = lastCompletedIndex
+                    }
+                    
+                    // Render todos, only bolding the appropriate item
+                    todosList.forEachIndexed { index, (content, status) ->
+                        val shouldBold = index == boldIndex
+                        val todoItem = createTodoItemComponent(content, status, shouldBold)
+                        todoItem.maximumSize = Dimension(Int.MAX_VALUE, todoItem.preferredSize.height)
+                        panel.add(todoItem)
+                        panel.add(Box.createVerticalStrut(4))
+                    }
                 }
             }
         } catch (e: Exception) {

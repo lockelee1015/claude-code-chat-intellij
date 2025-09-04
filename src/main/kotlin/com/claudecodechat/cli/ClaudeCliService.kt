@@ -143,8 +143,19 @@ class ClaudeCliService(private val project: Project) {
                         logger.info("Stdout line #$lineCount: $line")
                         if (line.isNotBlank()) {
                             try {
+                                logger.info("Raw message line: $line")
                                 val message = JsonUtils.parseClaudeMessage(line)
-                                logger.info("Parsed message type: ${message.type}")
+                                logger.info("Parsed message type: ${message.type}, subtype: ${message.subtype}")
+                                
+                                // Debug: Check if message contains usage data
+                                message.message?.usage?.let { usage ->
+                                    logger.info("USAGE DATA - input: ${usage.inputTokens}, output: ${usage.outputTokens}, cacheRead: ${usage.cacheReadInputTokens}, cacheCreation: ${usage.cacheCreationInputTokens}")
+                                }
+                                
+                                if (message.message?.usage == null) {
+                                    logger.info("No usage data found in message")
+                                }
+                                
                                 onMessage(message)
                             } catch (e: Exception) {
                                 logger.warn("Failed to parse Claude message: $line", e)
@@ -290,11 +301,24 @@ class ClaudeCliService(private val project: Project) {
         // Session management
         when {
             options.resume && options.sessionId != null -> {
+                // 使用 --resume 来恢复特定的 session
+                logger.info("Using --resume with sessionId: ${options.sessionId}")
                 args.add("--resume")
                 args.add(options.sessionId)
             }
+            options.sessionId != null -> {
+                // 使用 --session-id 来指定特定的 session ID
+                logger.info("Using --session-id: ${options.sessionId}")
+                args.add("--session-id")
+                args.add(options.sessionId)
+            }
             options.continueSession -> {
+                // 只有在没有指定 sessionId 时才使用 -c
+                logger.info("Using -c to continue most recent session")
                 args.add("-c")
+            }
+            else -> {
+                logger.info("No session management flags - will create new session")
             }
         }
         
