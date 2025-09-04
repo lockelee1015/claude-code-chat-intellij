@@ -50,6 +50,7 @@ class ClaudeCliService(private val project: Project) {
         val continueSession: Boolean = false,
         val verbose: Boolean = true,
         val skipPermissions: Boolean = true,
+        val permissionMode: String? = null,
         val customArgs: List<String> = emptyList()
     )
     
@@ -320,6 +321,13 @@ class ClaudeCliService(private val project: Project) {
             else -> {
                 logger.info("No session management flags - will create new session")
             }
+        }
+        
+        // Permission mode (plan mode)
+        if (options.permissionMode != null) {
+            args.add("--permission-mode")
+            args.add(options.permissionMode)
+            logger.info("Using permission mode: ${options.permissionMode}")
         }
         
         // Skip permissions is important for non-interactive mode

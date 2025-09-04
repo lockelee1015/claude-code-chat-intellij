@@ -261,7 +261,7 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
         
         val inputBar = com.claudecodechat.ui.swing.ChatInputBar(
             project = project,
-            onSend = { text, model ->
+            onSend = { text, model, planMode ->
                 // When sending from welcome, transition into a new chat tab
                 toolWindow.contentManager.removeContent(welcomeContent, true)
                 // Use first few words of the input as title
@@ -305,12 +305,17 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
     }
 
     private fun showHistoryPopup(project: Project, toolWindow: ToolWindow, anchor: Component) {
+        println("DEBUG: showHistoryPopup called")
         val basePath = project.basePath
+        println("DEBUG: basePath = $basePath")
         val sessions = if (basePath != null) {
             try {
-                SessionHistoryLoader().getRecentSessionsWithDetails(basePath, 15)
+                val sessionList = SessionHistoryLoader().getRecentSessionsWithDetails(basePath, 15)
                     .sortedByDescending { it.lastModified }
-            } catch (_: Exception) {
+                println("DEBUG: Found ${sessionList.size} sessions")
+                sessionList
+            } catch (e: Exception) {
+                println("DEBUG: Exception loading sessions: ${e.message}")
                 emptyList()
             }
         } else {
@@ -318,6 +323,7 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
         }
         
         if (sessions.isEmpty()) {
+            println("DEBUG: No sessions found, showing empty message")
             val popup = JBPopupFactory.getInstance()
                 .createMessage("No session history available")
             popup.showUnderneathOf(anchor)
@@ -398,7 +404,8 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
             y = anchorLocation.y - popupHeight
         }
         
-        popup.showInScreenCoordinates(toolWindowComponent, Point(x, y))
+        println("DEBUG: Showing popup underneath anchor")
+        popup.showUnderneathOf(anchor)
     }
     
     private fun extractTitleFromSession(session: SessionHistoryLoader.SessionInfo): String {

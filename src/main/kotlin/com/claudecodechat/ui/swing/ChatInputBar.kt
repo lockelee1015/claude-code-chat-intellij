@@ -23,6 +23,7 @@ import com.intellij.ui.AnimatedIcon
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
 import java.awt.*
+import java.awt.event.ActionEvent
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
 import javax.swing.*
@@ -33,7 +34,7 @@ import javax.swing.*
  */
 class ChatInputBar(
     private val project: Project,
-    private val onSend: (text: String, model: String) -> Unit,
+    private val onSend: (text: String, model: String, planMode: Boolean) -> Unit,
     private val onStop: (() -> Unit)? = null
 ) : JBPanel<ChatInputBar>(BorderLayout()) {
 
@@ -43,7 +44,15 @@ class ChatInputBar(
     // UI
     private val inputArea: JTextArea = JTextArea(4, 50)
     private val modelComboBox: JComboBox<String> = JComboBox(arrayOf("auto", "sonnet", "opus", "haiku"))
-    private val sendButton: JButton = JButton("Send (Ctrl+Enter)")
+    private val sendButton: JButton = JButton().apply {
+        icon = AllIcons.Actions.Execute
+        toolTipText = if (System.getProperty("os.name").lowercase().contains("mac")) {
+            "Send (Cmd+Enter)"
+        } else {
+            "Send (Ctrl+Enter)"
+        }
+        preferredSize = Dimension(40, 28)
+    }
     private val currentFileLabel: JLabel = JLabel("")
     
     // Context status bar
@@ -57,6 +66,9 @@ class ChatInputBar(
     private val loadingText: JLabel = JLabel("")
     private val timerLabel: JLabel = JLabel("")
     private val stopButton: JButton = JButton("Stop")
+    
+    // Plan mode checkbox
+    private val planModeCheckBox: JCheckBox = JCheckBox("Plan")
     
     // Timer for tracking execution time
     private var startTime: Long = 0
@@ -76,45 +88,66 @@ class ChatInputBar(
         inputArea.lineWrap = true
         inputArea.wrapStyleWord = true
         inputArea.font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
+        
+        // Override default key bindings for up/down arrows when completion is active
+        setupCompletionKeyBindings()
         inputArea.addKeyListener(object : KeyAdapter() {
             override fun keyPressed(e: KeyEvent) {
+                // Check completion state first for navigation keys
+                val state = currentCompletionState
+                val hasCompletion = state != null && state.isShowing && state.items.isNotEmpty()
+                
+                // Debug logging
+                if (e.keyCode == KeyEvent.VK_UP || e.keyCode == KeyEvent.VK_DOWN) {
+                    println("DEBUG: UP/DOWN pressed - state=$state, hasCompletion=$hasCompletion, popupVisible=${completionPopup?.isVisible}")
+                }
+                
                 when {
-                    e.keyCode == KeyEvent.VK_ENTER && e.isControlDown -> {
+                    // Handle completion navigation first (highest priority)
+                    hasCompletion && (e.keyCode == KeyEvent.VK_UP || e.keyCode == KeyEvent.VK_DOWN) -> {
+                        val currentIndex = completionList.selectedIndex
+                        val newIndex = when (e.keyCode) {
+                            KeyEvent.VK_UP -> if (currentIndex > 0) currentIndex - 1 else state.items.size - 1
+                            KeyEvent.VK_DOWN -> if (currentIndex < state.items.size - 1) currentIndex + 1 else 0
+                            else -> currentIndex
+                        }
+                        completionList.selectedIndex = newIndex
+                        completionList.ensureIndexIsVisible(newIndex)
+                        currentSelectedIndex = newIndex
+                        e.consume() // Prevent inputArea from handling up/down keys
+                    }
+                    // Handle completion selection
+                    hasCompletion && (e.keyCode == KeyEvent.VK_TAB || e.keyCode == KeyEvent.VK_ENTER) -> {
+                        applySelectedCompletion()
+                        e.consume()
+                    }
+                    // Handle completion dismissal
+                    e.keyCode == KeyEvent.VK_ESCAPE -> {
+                        if (hasCompletion) {
+                            hideCompletion()
+                        }
+                        e.consume()
+                    }
+                    // Handle send message
+                    e.keyCode == KeyEvent.VK_ENTER && (e.isControlDown || e.isMetaDown) -> {
                         sendMessage()
                         e.consume()
                     }
-                    e.keyCode == KeyEvent.VK_ESCAPE -> {
-                        hideCompletion()
+                    // Handle plan mode toggle
+                    e.keyCode == KeyEvent.VK_TAB && e.isShiftDown -> {
+                        togglePlanMode()
                         e.consume()
-                    }
-                    e.keyCode == KeyEvent.VK_UP || e.keyCode == KeyEvent.VK_DOWN -> {
-                
-                        if (completionPopup?.isVisible == true) {
-                            val state = currentCompletionState
-                            if (state != null && state.items.isNotEmpty()) {
-                                val currentIndex = completionList.selectedIndex
-                                val newIndex = when (e.keyCode) {
-                                    KeyEvent.VK_UP -> if (currentIndex > 0) currentIndex - 1 else state.items.size - 1
-                                    KeyEvent.VK_DOWN -> if (currentIndex < state.items.size - 1) currentIndex + 1 else 0
-                                    else -> currentIndex
-                                }
-                                completionList.selectedIndex = newIndex
-                                completionList.ensureIndexIsVisible(newIndex)
-                                currentSelectedIndex = newIndex
-                                e.consume() // Only consume when popup is visible
-                            }
-                        }
-                    }
-                    e.keyCode == KeyEvent.VK_TAB || e.keyCode == KeyEvent.VK_ENTER -> {
-                        if (completionPopup?.isVisible == true) {
-                            applySelectedCompletion()
-                            e.consume()
-                        }
                     }
                 }
             }
             override fun keyReleased(e: KeyEvent) {
-                if (!e.isControlDown && !e.isAltDown) updateCompletion()
+                // Only update completion for normal typing, not for modifier key combinations or navigation keys
+                if (!e.isControlDown && !e.isAltDown && !e.isMetaDown && !e.isShiftDown && 
+                    e.keyCode != KeyEvent.VK_UP && e.keyCode != KeyEvent.VK_DOWN && 
+                    e.keyCode != KeyEvent.VK_ENTER && e.keyCode != KeyEvent.VK_TAB && 
+                    e.keyCode != KeyEvent.VK_ESCAPE) {
+                    updateCompletion()
+                }
             }
         })
         inputArea.document.addDocumentListener(object : javax.swing.event.DocumentListener {
@@ -170,7 +203,19 @@ class ChatInputBar(
         val controls = JBPanel<JBPanel<*>>(BorderLayout()).apply {
             border = JBUI.Borders.empty()
             add(currentFileLabel, BorderLayout.WEST)
-            val right = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.RIGHT)).apply {
+            
+            val right = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
+                // Configure plan mode checkbox - compact and aligned
+                planModeCheckBox.apply {
+                    font = Font(Font.SANS_SERIF, Font.PLAIN, 11)
+                    toolTipText = "Enable plan mode (--permission-mode plan) - Use Shift+Tab to toggle"
+                    foreground = JBColor.foreground()
+                    preferredSize = Dimension(50, 28) // 紧凑宽度，匹配其他控件高度
+                    alignmentY = Component.CENTER_ALIGNMENT
+                }
+                
+                // 添加顺序：plan checkbox, 模型选择, 发送按钮
+                add(planModeCheckBox)
                 add(modelComboBox)
                 add(sendButton)
             }
@@ -204,6 +249,107 @@ class ChatInputBar(
         sendButton.addActionListener { sendMessage() }
         observeCompletion()
         setupFileInfoTracking()
+    }
+    
+    /**
+     * Setup key bindings to override JTextArea's default behavior for completion navigation
+     */
+    private fun setupCompletionKeyBindings() {
+        val inputMap = inputArea.getInputMap(JComponent.WHEN_FOCUSED)
+        val actionMap = inputArea.actionMap
+        
+        // Override UP key
+        inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_UP, 0), "completion-up")
+        actionMap.put("completion-up", object : AbstractAction() {
+            override fun actionPerformed(e: ActionEvent) {
+                val state = currentCompletionState
+                if (state != null && state.isShowing && state.items.isNotEmpty()) {
+                    val currentIndex = completionList.selectedIndex
+                    val newIndex = if (currentIndex > 0) currentIndex - 1 else state.items.size - 1
+                    completionList.selectedIndex = newIndex
+                    completionList.ensureIndexIsVisible(newIndex)
+                    currentSelectedIndex = newIndex
+                } else {
+                    // Default behavior: move cursor up
+                    val pos = inputArea.caretPosition
+                    try {
+                        val line = inputArea.getLineOfOffset(pos)
+                        if (line > 0) {
+                            val prevLineStart = inputArea.getLineStartOffset(line - 1)
+                            val prevLineEnd = inputArea.getLineEndOffset(line - 1)
+                            val currentLineStart = inputArea.getLineStartOffset(line)
+                            val offsetInLine = pos - currentLineStart
+                            val newPos = minOf(prevLineStart + offsetInLine, prevLineEnd)
+                            inputArea.caretPosition = newPos
+                        }
+                    } catch (ex: Exception) {
+                        // If anything goes wrong, just move to beginning
+                        inputArea.caretPosition = maxOf(0, pos - 1)
+                    }
+                }
+            }
+        })
+        
+        // Override DOWN key
+        inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_DOWN, 0), "completion-down")
+        actionMap.put("completion-down", object : AbstractAction() {
+            override fun actionPerformed(e: ActionEvent) {
+                val state = currentCompletionState
+                if (state != null && state.isShowing && state.items.isNotEmpty()) {
+                    val currentIndex = completionList.selectedIndex
+                    val newIndex = if (currentIndex < state.items.size - 1) currentIndex + 1 else 0
+                    completionList.selectedIndex = newIndex
+                    completionList.ensureIndexIsVisible(newIndex)
+                    currentSelectedIndex = newIndex
+                } else {
+                    // Default behavior: move cursor down
+                    val pos = inputArea.caretPosition
+                    try {
+                        val line = inputArea.getLineOfOffset(pos)
+                        val lineCount = inputArea.lineCount
+                        if (line < lineCount - 1) {
+                            val nextLineStart = inputArea.getLineStartOffset(line + 1)
+                            val nextLineEnd = inputArea.getLineEndOffset(line + 1)
+                            val currentLineStart = inputArea.getLineStartOffset(line)
+                            val offsetInLine = pos - currentLineStart
+                            val newPos = minOf(nextLineStart + offsetInLine, nextLineEnd)
+                            inputArea.caretPosition = newPos
+                        }
+                    } catch (ex: Exception) {
+                        // If anything goes wrong, just move to end
+                        inputArea.caretPosition = minOf(inputArea.text.length, pos + 1)
+                    }
+                }
+            }
+        })
+        
+        // Override TAB key for completion
+        inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_TAB, 0), "completion-tab")
+        actionMap.put("completion-tab", object : AbstractAction() {
+            override fun actionPerformed(e: ActionEvent) {
+                val state = currentCompletionState
+                if (state != null && state.isShowing && state.items.isNotEmpty()) {
+                    applySelectedCompletion()
+                } else {
+                    // Default behavior: insert tab or spaces
+                    inputArea.replaceSelection("    ") // 4 spaces
+                }
+            }
+        })
+        
+        // Override ENTER key for completion (but not Ctrl+Enter)
+        inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), "completion-enter")
+        actionMap.put("completion-enter", object : AbstractAction() {
+            override fun actionPerformed(e: ActionEvent) {
+                val state = currentCompletionState
+                if (state != null && state.isShowing && state.items.isNotEmpty()) {
+                    applySelectedCompletion()
+                } else {
+                    // Default behavior: insert newline
+                    inputArea.replaceSelection("\n")
+                }
+            }
+        })
     }
     
     /**
@@ -257,7 +403,7 @@ class ChatInputBar(
     /**
      * Update token usage information in the status bar
      */
-    fun updateTokenUsage(inputTokens: Int, outputTokens: Int, cacheReadTokens: Int = 0, cacheCreationTokens: Int = 0) {
+    fun updateTokenUsage(inputTokens: Int, outputTokens: Int, cacheReadTokens: Int = 0, cacheCreationTokens: Int = 0, sessionId: String? = null) {
         val contextLength = inputTokens + cacheReadTokens + cacheCreationTokens
         val totalTokens = contextLength + outputTokens
         
@@ -267,13 +413,26 @@ class ChatInputBar(
         }
         
         val displayText = if (contextLength > 0 || outputTokens > 0) {
-            if (cacheReadTokens > 0 || cacheCreationTokens > 0) {
+            val tokenInfo = if (cacheReadTokens > 0 || cacheCreationTokens > 0) {
                 "Context: ${formatTokens(contextLength)} (${formatTokens(inputTokens)}↑ + ${formatTokens(cacheReadTokens)} cache read + ${formatTokens(cacheCreationTokens)} cache creation) | Output: ${formatTokens(outputTokens)}↓"
             } else {
                 "Context: ${formatTokens(contextLength)} (${formatTokens(inputTokens)}↑) | Output: ${formatTokens(outputTokens)}↓"
             }
+            
+            // Add session ID in debug mode
+            if (com.claudecodechat.settings.ClaudeSettings.getInstance().debugMode && sessionId != null) {
+                "$tokenInfo | Session: ${sessionId.take(8)}"
+            } else {
+                tokenInfo
+            }
         } else {
-            "Context: Ready"
+            val baseText = "Context: Ready"
+            // Add session ID in debug mode even when no tokens
+            if (com.claudecodechat.settings.ClaudeSettings.getInstance().debugMode && sessionId != null) {
+                "$baseText | Session: ${sessionId.take(8)}"
+            } else {
+                baseText
+            }
         }
         
         println("DEBUG: updateTokenUsage called with input=$inputTokens, output=$outputTokens, cacheRead=$cacheReadTokens, cacheCreation=$cacheCreationTokens")
@@ -327,6 +486,18 @@ class ChatInputBar(
     private fun createPromptSummary(prompt: String): String {
         return if (prompt.length <= 50) prompt else prompt.take(47) + "..."
     }
+    
+    /**
+     * Toggle plan mode checkbox
+     */
+    private fun togglePlanMode() {
+        planModeCheckBox.isSelected = !planModeCheckBox.isSelected
+    }
+    
+    /**
+     * Check if plan mode is enabled
+     */
+    fun isPlanModeEnabled(): Boolean = planModeCheckBox.isSelected
 
     private fun sendMessage() {
         val text = inputArea.text.trim()
@@ -338,7 +509,7 @@ class ChatInputBar(
         
         inputArea.text = ""
         hideCompletion()
-        onSend(text, model)
+        onSend(text, model, planModeCheckBox.isSelected)
     }
 
     private fun updateCompletion() {
@@ -356,6 +527,9 @@ class ChatInputBar(
     }
 
     private fun handleCompletionState(state: CompletionState) {
+        // Always update current completion state
+        currentCompletionState = state
+        
         if (state.isShowing && state.items.isNotEmpty()) {
             showCompletionPopup(state)
         } else {
@@ -455,7 +629,7 @@ class ChatInputBar(
     private fun hideCompletion() {
         completionPopup?.cancel()
         completionPopup = null
-        currentCompletionState = null
+        // Don't clear currentCompletionState here - let handleCompletionState manage it
         completionManager.hideCompletion()
     }
 

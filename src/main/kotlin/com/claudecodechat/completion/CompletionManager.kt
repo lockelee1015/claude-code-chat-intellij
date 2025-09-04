@@ -153,9 +153,11 @@ class CompletionManager(private val project: Project) {
     private fun findTrigger(text: String, cursorPosition: Int): Triple<CompletionTrigger, Int, String>? {
         if (text.isEmpty() || cursorPosition <= 0 || cursorPosition > text.length) return null
         
-        // Look backward from cursor to find trigger
+        // Look backward from cursor to find trigger, but with more flexible rules
         var pos = minOf(cursorPosition - 1, text.length - 1)
-        while (pos >= 0 && pos < text.length) {
+        var searchLimit = maxOf(0, cursorPosition - 50) // Only search back 50 characters max
+        
+        while (pos >= searchLimit && pos < text.length) {
             val char = text[pos]
             
             when (char) {
@@ -164,6 +166,7 @@ class CompletionManager(private val project: Project) {
                     if (isValidSlashPosition(text, pos)) {
                         val endPos = minOf(cursorPosition, text.length)
                         val query = text.substring(pos + 1, endPos)
+                        // Allow query to contain spaces for slash commands
                         return Triple(CompletionTrigger.SLASH, pos, query)
                     }
                 }
@@ -172,14 +175,16 @@ class CompletionManager(private val project: Project) {
                     if (pos == 0 || (pos > 0 && text[pos - 1].isWhitespace())) {
                         val endPos = minOf(cursorPosition, text.length)
                         val query = text.substring(pos + 1, endPos)
-                        return Triple(CompletionTrigger.AT, pos, query)
+                        // For file references, stop at first space in query
+                        val spaceIndex = query.indexOf(' ')
+                        val cleanQuery = if (spaceIndex >= 0) query.substring(0, spaceIndex) else query
+                        return Triple(CompletionTrigger.AT, pos, cleanQuery)
                     }
                 }
-            }
-            
-            // Stop at whitespace
-            if (char.isWhitespace()) {
-                break
+                '\n' -> {
+                    // Stop at line breaks for performance
+                    break
+                }
             }
             
             pos--

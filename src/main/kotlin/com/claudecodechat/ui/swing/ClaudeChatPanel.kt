@@ -32,6 +32,7 @@ import javax.swing.UIManager
 import java.awt.FlowLayout
 import com.claudecodechat.ui.markdown.MarkdownRenderer
 import com.claudecodechat.ui.markdown.MarkdownRenderConfig
+import java.io.File
 
 class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>() {
     private val sessionViewModel = SessionViewModel.getInstance(project)
@@ -102,9 +103,14 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
     private fun createChatInputBar(): ChatInputBar {
         return ChatInputBar(
             project = project,
-            onSend = { text, model ->
-            val modelToUse = if (model == "auto") "" else model
-            sessionViewModel.sendPrompt(text, modelToUse)
+            onSend = { text, model, planMode ->
+                // Handle slash commands first
+                if (handleSlashCommand(text)) {
+                    return@ChatInputBar
+                }
+                
+                val modelToUse = if (model == "auto") "" else model
+                sessionViewModel.sendPrompt(text, modelToUse, planMode)
             },
             onStop = {
                 sessionViewModel.stopCurrentRequest()
@@ -159,11 +165,13 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
             sessionViewModel.sessionMetrics.collect { metrics ->
                 println("DEBUG: sessionMetrics collected - input=${metrics.totalInputTokens}, output=${metrics.totalOutputTokens}, cacheRead=${metrics.cacheReadInputTokens}, cacheCreation=${metrics.cacheCreationInputTokens}")
                 println("DEBUG: Metrics summary - total=${metrics.totalInputTokens + metrics.totalOutputTokens}, wasResumed=${metrics.wasResumed}")
+                val currentSessionId = sessionViewModel.currentSession.value?.sessionId
                 chatInputBar.updateTokenUsage(
                     metrics.totalInputTokens, 
                     metrics.totalOutputTokens,
                     metrics.cacheReadInputTokens,
-                    metrics.cacheCreationInputTokens
+                    metrics.cacheCreationInputTokens,
+                    currentSessionId
                 )
             }
         }
@@ -175,6 +183,94 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
     
     private fun loadInitialData() {
         // Load any initial data if needed
+    }
+    
+    /**
+     * Handle slash commands
+     * @return true if command was handled, false otherwise
+     */
+    private fun handleSlashCommand(text: String): Boolean {
+        val trimmedText = text.trim()
+        if (!trimmedText.startsWith("/")) {
+            return false
+        }
+        
+        val parts = trimmedText.substring(1).split(" ", limit = 2)
+        val command = parts[0].lowercase()
+        val args = if (parts.size > 1) parts[1] else ""
+        
+        return when (command) {
+            "clear" -> {
+                handleClearCommand()
+                true
+            }
+            "help" -> {
+                showHelpInfo()
+                true
+            }
+            else -> false
+        }
+    }
+    
+    
+    /**
+     * Handle clear chat command
+     */
+    private fun handleClearCommand() {
+        chatInputBar.hideLoading()
+        sessionViewModel.clearChat()
+        addSystemMessage("Chat history cleared.")
+    }
+    
+    /**
+     * Show help information
+     */
+    private fun showHelpInfo() {
+        chatInputBar.hideLoading()
+        
+        val helpText = buildString {
+            appendLine("## Available Slash Commands")
+            appendLine()
+            appendLine("**Local Commands:**")
+            appendLine("- `/clear` - Clear conversation history")
+            appendLine("- `/help` - Show this help message")
+            appendLine()
+            appendLine("**Claude Code Commands:**")
+            appendLine("- `/context` - Show current context usage (sent to Claude Code)")
+            appendLine("- All other slash commands are passed directly to Claude Code")
+            appendLine()
+            appendLine("**Usage Tips:**")
+            appendLine("- Use `@filename` to reference files")
+            appendLine("- Use `Ctrl+Enter` to send messages (Cmd+Enter on Mac)")
+            appendLine("- Use `Shift+Tab` to toggle plan mode")
+            appendLine("- Configure max messages per session in Settings")
+        }
+        
+        addSystemMessage(helpText)
+    }
+    
+    /**
+     * Add a system message to the chat
+     */
+    private fun addSystemMessage(content: String) {
+        val messageGroup = MessageGroup(
+            type = "assistant",
+            content = content
+        )
+        
+        // Add directly to UI without going through session
+        messagesPanel.add(createMessageComponent("ℹ️", JBColor.BLUE, content, JBColor.foreground()))
+        messagesPanel.add(Box.createVerticalStrut(8))
+        messagesPanel.add(Box.createVerticalGlue())
+        
+        messagesPanel.revalidate()
+        messagesPanel.repaint()
+        
+        // Scroll to bottom
+        SwingUtilities.invokeLater {
+            val scrollBar = chatScrollPane.verticalScrollBar
+            scrollBar.value = scrollBar.maximum
+        }
     }
     
     private fun updateChatDisplay(messages: List<ClaudeStreamMessage>) {
@@ -229,10 +325,13 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                 messagesPanel.revalidate()
                 messagesPanel.repaint()
                 
-                // Keep view anchored near bottom when new messages arrive
+                // Always scroll to bottom when new messages arrive, especially during loading
                 SwingUtilities.invokeLater {
                     val scrollBar = chatScrollPane.verticalScrollBar
-                    if (scrollBar.maximum - scrollBar.value <= 200) {
+                    val isLoading = sessionViewModel.isLoading.value
+                    
+                    // Auto-scroll during loading or if user is near bottom
+                    if (isLoading || scrollBar.maximum - scrollBar.value <= 200) {
                         scrollBar.value = scrollBar.maximum
                     }
                 }

@@ -39,10 +39,6 @@ class SlashCommandRegistry(private val project: Project) {
                 description = "Edit CLAUDE.md memory files"
             ),
             CompletionItem.SlashCommand(
-                name = "status",
-                description = "View account and system statuses"
-            ),
-            CompletionItem.SlashCommand(
                 name = "compact",
                 description = "Compact conversation with optional focus instructions",
                 argumentHint = "[instructions]"
@@ -55,14 +51,6 @@ class SlashCommandRegistry(private val project: Project) {
             CompletionItem.SlashCommand(
                 name = "agents",
                 description = "Manage custom AI subagents for specialized tasks"
-            ),
-            CompletionItem.SlashCommand(
-                name = "doctor",
-                description = "Checks the health of your Claude Code installation"
-            ),
-            CompletionItem.SlashCommand(
-                name = "mcp",
-                description = "Manage MCP server connections and OAuth authentication"
             ),
             CompletionItem.SlashCommand(
                 name = "pr_comments",

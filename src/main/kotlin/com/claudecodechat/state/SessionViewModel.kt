@@ -134,7 +134,8 @@ class SessionViewModel(private val project: Project) : Disposable {
     data class QueuedPrompt(
         val id: String,
         val prompt: String,
-        val model: String
+        val model: String,
+        val planMode: Boolean = false
     )
     
     // State flows
@@ -159,13 +160,13 @@ class SessionViewModel(private val project: Project) : Disposable {
     /**
      * Send a prompt to Claude
      */
-    fun sendPrompt(prompt: String, model: String = "sonnet") {
+    fun sendPrompt(prompt: String, model: String = "sonnet", planMode: Boolean = false) {
         logger.info("Sending prompt: $prompt with model: $model")
         
         // If already loading, queue the prompt
         if (_isLoading.value) {
             logger.info("Already loading, queueing prompt")
-            queuePrompt(prompt, model)
+            queuePrompt(prompt, model, planMode)
             return
         }
         
@@ -205,7 +206,8 @@ class SessionViewModel(private val project: Project) : Disposable {
                     resume = currentSessionId != null, // 如果有 sessionId 就使用 resume
                     continueSession = false, // 不使用 -c，而是明确指定 session
                     verbose = true,
-                    skipPermissions = true
+                    skipPermissions = true,
+                    permissionMode = if (planMode) "plan" else null
                 )
                 
                 // Execute Claude Code CLI with callback
@@ -622,12 +624,13 @@ class SessionViewModel(private val project: Project) : Disposable {
     /**
      * Queue a prompt for later execution
      */
-    private fun queuePrompt(prompt: String, model: String) {
+    private fun queuePrompt(prompt: String, model: String, planMode: Boolean = false) {
         Thread {
             val queuedPrompt = QueuedPrompt(
                 id = System.currentTimeMillis().toString(),
                 prompt = prompt,
-                model = model
+                model = model,
+                planMode = planMode
             )
             _queuedPrompts.value = _queuedPrompts.value + queuedPrompt
         }.apply {
@@ -645,7 +648,7 @@ class SessionViewModel(private val project: Project) : Disposable {
                 val prompt = _queuedPrompts.value.firstOrNull()
                 if (prompt != null) {
                     _queuedPrompts.value = _queuedPrompts.value.drop(1)
-                    sendPrompt(prompt.prompt, prompt.model)
+                    sendPrompt(prompt.prompt, prompt.model, prompt.planMode)
                 }
             }.apply {
                 name = "Process-Queue-Thread"
