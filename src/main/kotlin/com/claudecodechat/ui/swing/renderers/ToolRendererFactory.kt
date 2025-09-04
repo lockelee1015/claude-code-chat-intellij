@@ -29,7 +29,8 @@ object ToolRendererFactory {
         toolName: String,
         toolInput: kotlinx.serialization.json.JsonElement?,
         toolOutput: String,
-        hasError: Boolean
+        hasError: Boolean,
+        toolId: String? = null
     ): javax.swing.JPanel {
         val status = if (hasError) ToolStatus.ERROR else ToolStatus.SUCCESS
         val renderer = getRenderer(toolName)
@@ -44,6 +45,6 @@ object ToolRendererFactory {
             else -> toolName
         }
         
-        return cardRenderer.createCard(displayName, toolInput, toolOutput, status, renderer)
+        return cardRenderer.createCard(displayName, toolInput, toolOutput, status, renderer, toolId)
     }
 }

@@ -1,29 +1,42 @@
 package com.claudecodechat.ui.swing.renderers
 
+import com.claudecodechat.settings.ClaudeSettings
 import com.intellij.diff.DiffContentFactory
 import com.intellij.diff.DiffManager
 import com.intellij.diff.requests.SimpleDiffRequest
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.ProjectManager
+import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.ui.DialogWrapper
+import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBPanel
+import com.intellij.ui.components.JBScrollPane
+import com.intellij.ui.components.JBTextArea
 import com.intellij.util.ui.JBUI
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.Json
 import java.awt.*
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.io.File
 import javax.swing.JPanel
 import javax.swing.Box
+import javax.swing.Action
+import javax.swing.JComponent
 
 /**
  * Parent renderer that wraps tool content with title bar and card styling
  */
 class ToolCardRenderer {
+    
+    companion object {
+        private val prettyJson = Json { prettyPrint = true }
+    }
     
     /**
      * Create a complete tool card with title bar and content
@@ -33,7 +46,8 @@ class ToolCardRenderer {
         toolInput: JsonElement?,
         toolOutput: String,
         status: ToolStatus,
-        renderer: ToolRenderer
+        renderer: ToolRenderer,
+        toolId: String? = null
     ): JPanel {
         val input = ToolRenderInput(toolName, toolInput, toolOutput, status)
         
@@ -43,12 +57,12 @@ class ToolCardRenderer {
             maximumSize = Dimension(Int.MAX_VALUE, 300) // Limit height
             
             // Create title bar (with special handling for Read tool)
-                    val titleBar = if (toolName.lowercase() == "read" || 
+            val titleBar = if (toolName.lowercase() == "read" || 
                               toolName.lowercase() in listOf("edit", "multiedit", "write")) {
-            createClickableTitleBar(toolName, renderer.extractDisplayParameters(toolInput), status, toolInput)
-        } else {
-            createTitleBar(toolName, renderer.extractDisplayParameters(toolInput), status)
-        }
+                createClickableTitleBar(toolName, renderer.extractDisplayParameters(toolInput), status, toolInput, toolId, toolOutput)
+            } else {
+                createTitleBar(toolName, renderer.extractDisplayParameters(toolInput), status, toolId, toolInput, toolOutput)
+            }
             add(titleBar, BorderLayout.NORTH)
             
             // Create content panel using specific renderer
@@ -60,7 +74,7 @@ class ToolCardRenderer {
     /**
      * Create title bar with status colors
      */
-    private fun createTitleBar(toolName: String, parameters: String, status: ToolStatus): JPanel {
+    private fun createTitleBar(toolName: String, parameters: String, status: ToolStatus, toolId: String? = null, toolInput: JsonElement? = null, toolOutput: String? = null): JPanel {
         return JBPanel<JBPanel<*>>(BorderLayout()).apply {
             background = getStatusBackgroundColor(status)
             border = JBUI.Borders.empty(8, 12)
@@ -72,13 +86,30 @@ class ToolCardRenderer {
             }
             
             add(titleLabel, BorderLayout.WEST)
+            
+            // Add debug info if debug mode is enabled
+            if (ClaudeSettings.getInstance().debugMode && toolId != null) {
+                val debugLabel = JBLabel("ID: ${toolId.take(8)}").apply {
+                    foreground = JBColor.GRAY
+                    font = Font(Font.MONOSPACED, Font.PLAIN, 10)
+                    cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                    toolTipText = "Click to view debug info"
+                    
+                    addMouseListener(object : MouseAdapter() {
+                        override fun mouseClicked(e: MouseEvent) {
+                            showDebugPopup(toolName, parameters, toolId, toolInput, toolOutput)
+                        }
+                    })
+                }
+                add(debugLabel, BorderLayout.EAST)
+            }
         }
     }
     
     /**
      * Create clickable title bar for Read and Edit tools
      */
-    private fun createClickableTitleBar(toolName: String, filePath: String, status: ToolStatus, toolInput: JsonElement?): JPanel {
+    private fun createClickableTitleBar(toolName: String, filePath: String, status: ToolStatus, toolInput: JsonElement?, toolId: String? = null, toolOutput: String? = null): JPanel {
         return JBPanel<JBPanel<*>>(BorderLayout()).apply {
             background = getStatusBackgroundColor(status)
             border = JBUI.Borders.empty(8, 12)
@@ -169,6 +200,30 @@ class ToolCardRenderer {
                     }
                     add(contentLink, BorderLayout.EAST)
                 }
+            }
+            
+            // Add debug info if debug mode is enabled
+            if (ClaudeSettings.getInstance().debugMode && toolId != null) {
+                val debugPanel = JBPanel<JBPanel<*>>(BorderLayout()).apply {
+                    background = getStatusBackgroundColor(status)
+                    border = JBUI.Borders.empty(4, 0, 0, 0)
+                }
+                
+                val debugLabel = JBLabel("ID: ${toolId.take(8)}").apply {
+                    foreground = JBColor.GRAY
+                    font = Font(Font.MONOSPACED, Font.PLAIN, 10)
+                    cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                    toolTipText = "Click to view debug info"
+                    
+                    addMouseListener(object : MouseAdapter() {
+                        override fun mouseClicked(e: MouseEvent) {
+                            showDebugPopup(toolName, filePath, toolId, toolInput, toolOutput)
+                        }
+                    })
+                }
+                
+                debugPanel.add(debugLabel, BorderLayout.EAST)
+                add(debugPanel, BorderLayout.SOUTH)
             }
         }
     }
@@ -310,6 +365,100 @@ class ToolCardRenderer {
             }
         } catch (e: Exception) {
             // Ignore errors in content display
+        }
+    }
+    
+    /**
+     * Show debug popup with detailed tool information (for simple tools)
+     */
+    private fun showDebugPopup(toolName: String, parameters: String, toolId: String) {
+        showDebugPopup(toolName, parameters, toolId, null, null)
+    }
+    
+    /**
+     * Show debug popup with detailed tool information (for complex tools with full input)
+     */
+    private fun showDebugPopup(toolName: String, parameters: String, toolId: String, toolInput: JsonElement?, toolOutput: String? = null) {
+        val debugInfo = buildString {
+            appendLine("Tool Debug Information")
+            appendLine("=".repeat(50))
+            appendLine("Tool Name: $toolName")
+            appendLine("Tool ID: $toolId")
+            appendLine("Display Parameters: $parameters")
+            appendLine("Timestamp: ${java.time.LocalDateTime.now()}")
+            appendLine()
+            
+            if (toolInput != null) {
+                appendLine("Input JSON:")
+                appendLine("-".repeat(30))
+                // Pretty print JSON if possible
+                try {
+                    val formattedJson = prettyJson.encodeToString(kotlinx.serialization.json.JsonElement.serializer(), toolInput)
+                    appendLine(formattedJson)
+                } catch (e: Exception) {
+                    appendLine(toolInput.toString())
+                }
+                appendLine()
+            }
+            
+            if (toolOutput != null) {
+                appendLine("Output:")
+                appendLine("-".repeat(30))
+                if (toolOutput.length > 2000) {
+                    appendLine("${toolOutput.take(2000)}...")
+                    appendLine("\n[Output truncated - showing first 2000 characters]")
+                } else {
+                    appendLine(toolOutput)
+                }
+                appendLine()
+            }
+            
+            if (toolInput == null && toolOutput == null) {
+                appendLine("No detailed input/output data available")
+            }
+            
+            appendLine("Debug mode: Enabled in settings")
+        }
+        
+        val textArea = JBTextArea(debugInfo).apply {
+            isEditable = false
+            font = Font(Font.MONOSPACED, Font.PLAIN, 12)
+            lineWrap = true
+            wrapStyleWord = true
+        }
+        
+        val scrollPane = JBScrollPane(textArea).apply {
+            preferredSize = Dimension(600, 400)
+        }
+        
+        DebugInfoDialog(toolName, scrollPane).show()
+    }
+}
+
+/**
+ * Custom dialog for displaying debug information
+ */
+private class DebugInfoDialog(
+    private val toolName: String, 
+    private val contentPane: JBScrollPane
+) : DialogWrapper(true) {
+    
+    init {
+        title = "Debug Info - $toolName"
+        init()
+    }
+    
+    override fun createCenterPanel(): JComponent {
+        return contentPane
+    }
+    
+    override fun createActions(): Array<Action> {
+        return arrayOf(okAction)
+    }
+    
+    override fun getOKAction(): Action {
+        return super.getOKAction().apply {
+            putValue(Action.NAME, "Close")
         }
     }
 }

@@ -11,6 +11,8 @@ import com.intellij.openapi.editor.markup.HighlighterLayer
 import com.intellij.openapi.editor.markup.MarkupModel
 import com.intellij.openapi.editor.markup.RangeHighlighter
 import com.intellij.openapi.editor.markup.TextAttributes
+import com.intellij.openapi.editor.markup.EffectType
+import com.intellij.openapi.editor.markup.HighlighterTargetArea
 import com.intellij.openapi.editor.ScrollType
 import com.intellij.openapi.fileTypes.FileType
 import com.intellij.openapi.fileTypes.FileTypeManager
@@ -29,6 +31,7 @@ import java.awt.event.MouseEvent
 import javax.swing.JButton
 import javax.swing.JPanel
 import javax.swing.SwingConstants
+import java.awt.FlowLayout
 
 /**
  * Renderer for Edit tool using IntelliJ's native editor
@@ -89,11 +92,24 @@ class EditRenderer : ToolRenderer() {
         return JBPanel<JBPanel<*>>(BorderLayout()).apply {
             background = JBColor.background()
             
-            // Create diff view directly (no header needed since title bar handles it)
-            val diffPanel = if (editInfo.oldString.isNotEmpty() && editInfo.newString.isNotEmpty()) {
-                createInlineDiffView(editInfo.oldString, editInfo.newString, fileType)
-            } else {
-                createSummaryView(editInfo)
+            // Create diff view based on operation type
+            val diffPanel = when {
+                // Normal edit with both old and new content
+                editInfo.oldString.isNotEmpty() && editInfo.newString.isNotEmpty() -> {
+                    createInlineDiffView(editInfo.oldString, editInfo.newString, fileType)
+                }
+                // Deletion operation (old content exists, new content is empty)
+                editInfo.oldString.isNotEmpty() && editInfo.newString.isEmpty() -> {
+                    createDeletionView(editInfo.oldString, fileType)
+                }
+                // Addition operation (no old content, new content exists) 
+                editInfo.oldString.isEmpty() && editInfo.newString.isNotEmpty() -> {
+                    createAdditionView(editInfo.newString, fileType)
+                }
+                // Other cases (multiedit, etc.)
+                else -> {
+                    createSummaryView(editInfo)
+                }
             }
             
             add(diffPanel, BorderLayout.CENTER)
@@ -202,6 +218,66 @@ class EditRenderer : ToolRenderer() {
     }
     
     /**
+     * Highlight text as deleted (red background)
+     */
+    private fun highlightAsDeleted(editor: Editor, text: String) {
+        try {
+            val markupModel = editor.markupModel
+            val textLength = text.length
+            
+            // Add red background highlighting for entire content
+            val highlighter = markupModel.addRangeHighlighter(
+                0, textLength,
+                HighlighterLayer.SELECTION - 1,
+                createDeletedTextAttributes(),
+                HighlighterTargetArea.EXACT_RANGE
+            )
+        } catch (e: Exception) {
+            // Ignore highlighting errors
+        }
+    }
+    
+    /**
+     * Highlight text as added (green background)
+     */
+    private fun highlightAsAdded(editor: Editor, text: String) {
+        try {
+            val markupModel = editor.markupModel
+            val textLength = text.length
+            
+            // Add green background highlighting for entire content
+            val highlighter = markupModel.addRangeHighlighter(
+                0, textLength,
+                HighlighterLayer.SELECTION - 1,
+                createAddedTextAttributes(),
+                HighlighterTargetArea.EXACT_RANGE
+            )
+        } catch (e: Exception) {
+            // Ignore highlighting errors
+        }
+    }
+    
+    /**
+     * Create text attributes for deleted content
+     */
+    private fun createDeletedTextAttributes(): TextAttributes {
+        return TextAttributes().apply {
+            backgroundColor = Color(255, 220, 220) // Light red background
+            effectType = EffectType.STRIKEOUT
+            effectColor = Color(160, 20, 20) // Dark red strike-through
+        }
+    }
+    
+    /**
+     * Create text attributes for added content
+     */
+    private fun createAddedTextAttributes(): TextAttributes {
+        return TextAttributes().apply {
+            backgroundColor = Color(220, 255, 220) // Light green background
+        }
+    }
+    
+    /**
      * Highlight a line in the editor
      */
     private fun highlightLine(markupModel: MarkupModel, startOffset: Int, endOffset: Int, isAdded: Boolean) {
@@ -246,6 +322,123 @@ class EditRenderer : ToolRenderer() {
         settings.isVirtualSpace = false
         settings.isBlockCursor = false
         settings.isCaretRowShown = false
+    }
+    
+    /**
+     * Configure viewer settings for deletion/addition views
+     */
+    private fun configureViewerSettings(editor: Editor) {
+        val settings = editor.settings
+        
+        // Configure appearance
+        settings.isLineNumbersShown = true
+        settings.isFoldingOutlineShown = false
+        settings.isAutoCodeFoldingEnabled = false
+        settings.isRightMarginShown = false
+        settings.isWhitespacesShown = false
+        settings.isLeadingWhitespaceShown = false
+        settings.isTrailingWhitespaceShown = false
+        
+        // Disable editing features
+        settings.isVirtualSpace = false
+        settings.isBlockCursor = false
+        settings.isCaretRowShown = false
+    }
+    
+    /**
+     * Create deletion view showing removed content with strike-through
+     */
+    private fun createDeletionView(deletedText: String, fileType: FileType): JPanel {
+        return JBPanel<JBPanel<*>>(BorderLayout()).apply {
+            background = JBColor.background()
+            
+            // Create header to indicate deletion
+            val headerPanel = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, 8, 4)).apply {
+                background = Color(255, 235, 235, 180) // Light red background
+                
+                val deleteIcon = JBLabel("🗑").apply {
+                    font = Font(Font.SANS_SERIF, Font.PLAIN, 14)
+                }
+                
+                val deleteLabel = JBLabel("Deleted content:").apply {
+                    font = Font(Font.SANS_SERIF, Font.BOLD, 11)
+                    foreground = Color(160, 20, 20) // Dark red
+                }
+                
+                add(deleteIcon)
+                add(deleteLabel)
+            }
+            
+            // Create editor showing deleted content with strike-through effect
+            val editorPanel = try {
+                val project = ProjectManager.getInstance().defaultProject
+                val editorFactory = EditorFactory.getInstance()
+                val document = editorFactory.createDocument(deletedText)
+                val editor = editorFactory.createViewer(document, project)
+                
+                // Configure editor appearance
+                configureViewerSettings(editor)
+                
+                // Add red background highlighting to show deletion
+                highlightAsDeleted(editor, deletedText)
+                
+                editor.component
+            } catch (e: Exception) {
+                // Fallback to simple text area
+                createSimpleTextView(deletedText)
+            }
+            
+            add(headerPanel, BorderLayout.NORTH)
+            add(editorPanel, BorderLayout.CENTER)
+        }
+    }
+    
+    /**
+     * Create addition view showing added content
+     */
+    private fun createAdditionView(addedText: String, fileType: FileType): JPanel {
+        return JBPanel<JBPanel<*>>(BorderLayout()).apply {
+            background = JBColor.background()
+            
+            // Create header to indicate addition
+            val headerPanel = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, 8, 4)).apply {
+                background = Color(235, 255, 235, 180) // Light green background
+                
+                val addIcon = JBLabel("➕").apply {
+                    font = Font(Font.SANS_SERIF, Font.PLAIN, 14)
+                }
+                
+                val addLabel = JBLabel("Added content:").apply {
+                    font = Font(Font.SANS_SERIF, Font.BOLD, 11)
+                    foreground = Color(20, 120, 20) // Dark green
+                }
+                
+                add(addIcon)
+                add(addLabel)
+            }
+            
+            // Create editor showing added content
+            val editorPanel = try {
+                val project = ProjectManager.getInstance().defaultProject
+                val editorFactory = EditorFactory.getInstance()
+                val document = editorFactory.createDocument(addedText)
+                val editor = editorFactory.createViewer(document, project)
+                
+                // Configure editor appearance
+                configureViewerSettings(editor)
+                
+                // Add green background highlighting to show addition
+                highlightAsAdded(editor, addedText)
+                
+                editor.component
+            } catch (e: Exception) {
+                // Fallback to simple text area
+                createSimpleTextView(addedText)
+            }
+            
+            add(headerPanel, BorderLayout.NORTH)
+            add(editorPanel, BorderLayout.CENTER)
+        }
     }
     
     /**

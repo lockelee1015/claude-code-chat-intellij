@@ -5,6 +5,7 @@ import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBTextField
 import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.components.JBScrollPane
+import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.JBIntSpinner
 import com.intellij.util.ui.FormBuilder
 import javax.swing.JComponent
@@ -29,7 +30,8 @@ class ClaudeSettingsConfigurable : Configurable {
         
         return component.claudePath != settings.claudePath ||
                 component.environmentVariables != settings.environmentVariables ||
-                component.markdownFontSize != settings.markdownFontSize
+                component.markdownFontSize != settings.markdownFontSize ||
+                component.debugMode != settings.debugMode
     }
     
     override fun apply() {
@@ -39,6 +41,7 @@ class ClaudeSettingsConfigurable : Configurable {
         settings.claudePath = component.claudePath
         settings.environmentVariables = component.environmentVariables
         settings.markdownFontSize = component.markdownFontSize
+        settings.debugMode = component.debugMode
     }
     
     override fun reset() {
@@ -48,6 +51,7 @@ class ClaudeSettingsConfigurable : Configurable {
         component.claudePath = settings.claudePath
         component.environmentVariables = settings.environmentVariables
         component.markdownFontSize = settings.markdownFontSize
+        component.debugMode = settings.debugMode
     }
     
     override fun disposeUIResources() {
@@ -59,6 +63,7 @@ class ClaudeSettingsConfigurable : Configurable {
         private val claudePathField = JBTextField()
         private val environmentVariablesArea = JBTextArea(5, 40)
         private val markdownFontSizeSpinner = JBIntSpinner(11, 8, 24)
+        private val debugModeCheckBox = JBCheckBox("Enable debug mode (show tool IDs and debug info)")
         
         init {
             panel = FormBuilder.createFormBuilder()
@@ -82,6 +87,7 @@ class ClaudeSettingsConfigurable : Configurable {
                     1,
                     false
                 )
+                .addComponent(debugModeCheckBox, 1)
                 .addComponentFillVertically(JPanel(), 0)
                 .panel
         }
@@ -102,6 +108,12 @@ class ClaudeSettingsConfigurable : Configurable {
             get() = markdownFontSizeSpinner.number
             set(value) {
                 markdownFontSizeSpinner.number = value
+            }
+        
+        var debugMode: Boolean
+            get() = debugModeCheckBox.isSelected
+            set(value) {
+                debugModeCheckBox.isSelected = value
             }
     }
 }

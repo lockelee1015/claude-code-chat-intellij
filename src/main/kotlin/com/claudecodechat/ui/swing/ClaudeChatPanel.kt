@@ -193,7 +193,8 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                             group.toolUse?.name ?: "Unknown",
                             group.toolUse?.input,
                             group.toolResult?.content ?: group.toolResult?.text ?: "",
-                            group.toolResult?.isError == true
+                            group.toolResult?.isError == true,
+                            group.toolUse?.id
                         )
                         "error" -> createMessageComponent("●", Color.decode("#FF6B6B"), group.content, Color.decode("#FF6B6B"))
                         else -> null

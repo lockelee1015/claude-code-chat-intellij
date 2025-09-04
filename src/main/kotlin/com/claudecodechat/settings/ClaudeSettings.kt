@@ -14,6 +14,7 @@ class ClaudeSettings : PersistentStateComponent<ClaudeSettings> {
     var claudePath: String = ""
     var environmentVariables: String = ""
     var markdownFontSize: Int = 11  // Default markdown font size
+    var debugMode: Boolean = false  // Debug mode for tool development
     
     companion object {
         fun getInstance(): ClaudeSettings {
