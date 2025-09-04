@@ -29,6 +29,7 @@ import java.awt.event.*
 import javax.swing.*
 import javax.swing.text.*
 import javax.swing.UIManager
+import java.awt.FlowLayout
 import com.claudecodechat.ui.markdown.MarkdownRenderer
 import com.claudecodechat.ui.markdown.MarkdownRenderConfig
 
@@ -182,8 +183,23 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
             messagesPanel.removeAll()
             
             try {
+                // Apply message limit before processing
+                val maxMessages = ClaudeSettings.getInstance().maxMessagesPerSession
+                val limitedMessages = if (messages.size > maxMessages) {
+                    messages.takeLast(maxMessages)
+                } else {
+                    messages
+                }
+                
                 // Group messages to handle tool use/result pairs
-                val groupedMessages = groupToolMessages(messages)
+                val groupedMessages = groupToolMessages(limitedMessages)
+                
+                // Add truncation indicator if messages were limited
+                if (messages.size > maxMessages) {
+                    val truncationIndicator = createTruncationIndicator(messages.size - maxMessages)
+                    messagesPanel.add(truncationIndicator)
+                    messagesPanel.add(Box.createVerticalStrut(8))
+                }
                 
                 for (group in groupedMessages) {
                     val messageComponent = when (group.type) {
@@ -317,6 +333,46 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         }
         
         return groups
+    }
+    
+    /**
+     * Create truncation indicator to show when messages are limited
+     */
+    private fun createTruncationIndicator(hiddenCount: Int): JPanel {
+        return JBPanel<JBPanel<*>>(BorderLayout()).apply {
+            border = JBUI.Borders.empty(8, 0, 8, 0)
+            background = getMessageAreaBackgroundColor()
+            
+            val indicatorPanel = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.CENTER, 8, 4)).apply {
+                background = if (JBColor.isBright()) {
+                    Color(255, 248, 220) // 明亮主题：浅黄色
+                } else {
+                    Color(60, 50, 20) // 深色主题：深黄色
+                }
+                border = JBUI.Borders.compound(
+                    JBUI.Borders.customLine(JBColor.border(), 1),
+                    JBUI.Borders.empty(6, 12)
+                )
+                
+                val icon = JBLabel("⚠️").apply {
+                    font = Font(Font.SANS_SERIF, Font.PLAIN, 14)
+                }
+                
+                val label = JBLabel("显示最新 ${ClaudeSettings.getInstance().maxMessagesPerSession} 条消息，已隐藏 $hiddenCount 条较早的消息").apply {
+                    font = Font(Font.SANS_SERIF, Font.PLAIN, 11)
+                    foreground = if (JBColor.isBright()) {
+                        Color(120, 100, 40) // 明亮主题：深黄褐色
+                    } else {
+                        Color(200, 180, 120) // 深色主题：浅黄色
+                    }
+                }
+                
+                add(icon)
+                add(label)
+            }
+            
+            add(indicatorPanel, BorderLayout.CENTER)
+        }
     }
     
     /**

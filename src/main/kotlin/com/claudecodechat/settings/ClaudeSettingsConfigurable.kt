@@ -31,7 +31,8 @@ class ClaudeSettingsConfigurable : Configurable {
         return component.claudePath != settings.claudePath ||
                 component.environmentVariables != settings.environmentVariables ||
                 component.markdownFontSize != settings.markdownFontSize ||
-                component.debugMode != settings.debugMode
+                component.debugMode != settings.debugMode ||
+                component.maxMessagesPerSession != settings.maxMessagesPerSession
     }
     
     override fun apply() {
@@ -42,6 +43,7 @@ class ClaudeSettingsConfigurable : Configurable {
         settings.environmentVariables = component.environmentVariables
         settings.markdownFontSize = component.markdownFontSize
         settings.debugMode = component.debugMode
+        settings.maxMessagesPerSession = component.maxMessagesPerSession
     }
     
     override fun reset() {
@@ -52,6 +54,7 @@ class ClaudeSettingsConfigurable : Configurable {
         component.environmentVariables = settings.environmentVariables
         component.markdownFontSize = settings.markdownFontSize
         component.debugMode = settings.debugMode
+        component.maxMessagesPerSession = settings.maxMessagesPerSession
     }
     
     override fun disposeUIResources() {
@@ -64,6 +67,7 @@ class ClaudeSettingsConfigurable : Configurable {
         private val environmentVariablesArea = JBTextArea(5, 40)
         private val markdownFontSizeSpinner = JBIntSpinner(11, 8, 24)
         private val debugModeCheckBox = JBCheckBox("Enable debug mode (show tool IDs and debug info)")
+        private val maxMessagesSpinner = JBIntSpinner(100, 10, 1000)
         
         init {
             panel = FormBuilder.createFormBuilder()
@@ -84,6 +88,12 @@ class ClaudeSettingsConfigurable : Configurable {
                 .addLabeledComponent(
                     JBLabel("Markdown Font Size (8-24px):"),
                     markdownFontSizeSpinner,
+                    1,
+                    false
+                )
+                .addLabeledComponent(
+                    JBLabel("Max Messages Per Session (10-1000):"),
+                    maxMessagesSpinner,
                     1,
                     false
                 )
@@ -114,6 +124,12 @@ class ClaudeSettingsConfigurable : Configurable {
             get() = debugModeCheckBox.isSelected
             set(value) {
                 debugModeCheckBox.isSelected = value
+            }
+        
+        var maxMessagesPerSession: Int
+            get() = maxMessagesSpinner.number
+            set(value) {
+                maxMessagesSpinner.number = value
             }
     }
 }

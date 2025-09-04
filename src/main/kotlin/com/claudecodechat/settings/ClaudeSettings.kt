@@ -15,6 +15,7 @@ class ClaudeSettings : PersistentStateComponent<ClaudeSettings> {
     var environmentVariables: String = ""
     var markdownFontSize: Int = 11  // Default markdown font size
     var debugMode: Boolean = false  // Debug mode for tool development
+    var maxMessagesPerSession: Int = 100  // Maximum messages to display per session
     
     companion object {
         fun getInstance(): ClaudeSettings {
