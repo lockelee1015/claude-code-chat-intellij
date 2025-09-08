@@ -2,6 +2,8 @@ package com.claudecodechat.ui.swing
 
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.editor.*
+import com.intellij.openapi.editor.actionSystem.EditorActionHandler
+import com.intellij.openapi.editor.actionSystem.EditorActionManager
 import com.intellij.openapi.editor.event.CaretEvent
 import com.intellij.openapi.editor.event.CaretListener
 import com.intellij.openapi.editor.event.DocumentEvent
@@ -16,6 +18,11 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.JBUI
 import com.intellij.icons.AllIcons
 import com.intellij.ui.AnimatedIcon
+import com.intellij.codeInsight.lookup.LookupManager
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.CustomShortcutSet
+import com.intellij.openapi.actionSystem.IdeActions
 import kotlinx.coroutines.*
 import java.awt.*
 import java.awt.event.KeyAdapter
@@ -81,6 +88,9 @@ class ChatInputBar(
         val (editor, document) = createInputEditor()
         inputEditor = editor
         inputDocument = document
+
+        // Install Enter-to-send on this editor (Shift+Enter inserts newline)
+        installEnterToSend(inputEditor)
 
 
         // Setup status bar
@@ -276,6 +286,50 @@ class ChatInputBar(
                 }
             }
         })
+    }
+
+    // --- Enter to Send wiring ---
+    private var originalEnterHandler: EditorActionHandler? = null
+    private var customEnterHandler: EditorActionHandler? = null
+    private var shiftEnterAction: AnAction? = null
+
+    private fun installEnterToSend(chatEditor: Editor) {
+        val mgr = EditorActionManager.getInstance()
+        val actionId = IdeActions.ACTION_EDITOR_ENTER
+        val prev = mgr.getActionHandler(actionId)
+        originalEnterHandler = prev
+
+        val custom = object : EditorActionHandler() {
+            override fun doExecute(editor: Editor, caret: Caret?, dataContext: com.intellij.openapi.actionSystem.DataContext) {
+                // 仅拦截我们的聊天输入 editor
+                if (editor === chatEditor) {
+                    // 若有补全列表，保持默认 Enter 行为
+                    if (LookupManager.getActiveLookup(editor) != null) {
+                        originalEnterHandler?.execute(editor, caret, dataContext)
+                        return
+                    }
+                    // 回车即发送
+                    sendMessage()
+                    return // 不调用 original -> 不插入换行
+                }
+                // 其他编辑器默认行为
+                originalEnterHandler?.execute(editor, caret, dataContext)
+            }
+        }
+        customEnterHandler = custom
+        mgr.setActionHandler(actionId, custom)
+
+        // Shift+Enter 在聊天 editor 中插入换行（调用原始 Enter 处理器）
+        val shiftAct = object : AnAction() {
+            override fun actionPerformed(e: AnActionEvent) {
+                originalEnterHandler?.execute(chatEditor, chatEditor.caretModel.currentCaret, e.dataContext)
+            }
+        }
+        shiftAct.registerCustomShortcutSet(
+            CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, java.awt.event.InputEvent.SHIFT_DOWN_MASK)),
+            chatEditor.contentComponent
+        )
+        shiftEnterAction = shiftAct
     }
     
     
@@ -585,8 +639,18 @@ class ChatInputBar(
      */
     fun dispose() {
         scope.cancel()
+        // Restore Enter handler
+        try {
+            val actionId = IdeActions.ACTION_EDITOR_ENTER
+            val mgr = EditorActionManager.getInstance()
+            val current = mgr.getActionHandler(actionId)
+            if (current === customEnterHandler && originalEnterHandler != null) {
+                mgr.setActionHandler(actionId, originalEnterHandler!!)
+            }
+        } catch (_: Exception) { }
+        // Unregister Shift+Enter shortcut
+        try {
+            shiftEnterAction?.unregisterCustomShortcutSet(inputEditor.contentComponent)
+        } catch (_: Exception) { }
     }
 }
-
-
-
