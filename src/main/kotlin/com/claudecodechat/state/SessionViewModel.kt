@@ -611,14 +611,11 @@ class SessionViewModel(private val project: Project) : Disposable {
     )
     
     /**
-     * Clear the chat
+     * Clear the chat and start a new session
      */
     fun clearChat() {
-        currentThread?.interrupt()
-        _messages.value = emptyList()
-        _sessionMetrics.value = SessionMetrics()
-        _queuedPrompts.value = emptyList()
-        errorList.clear()
+        logger.info("Clearing chat and starting new session")
+        startNewSession()
     }
     
     /**

@@ -13,10 +13,9 @@ class SlashCommandRegistry(private val project: Project) {
      */
     fun getBuiltInCommands(): List<CompletionItem.SlashCommand> {
         return listOf(
-            // 这个要自己实现
             CompletionItem.SlashCommand(
                 name = "clear",
-                description = "Clear conversation history"
+                description = "Clear conversation history and start new session"
             ),
             CompletionItem.SlashCommand(
                 name = "init",
