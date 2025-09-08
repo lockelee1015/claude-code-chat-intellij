@@ -1,6 +1,7 @@
 package com.claudecodechat.ui.markdown
 
 import com.claudecodechat.settings.ClaudeSettings
+import com.claudecodechat.ui.fonts.FontManager
 import com.intellij.ui.JBColor
 import com.intellij.util.ui.JBUI
 import com.vladsch.flexmark.ast.Heading
@@ -29,6 +30,7 @@ data class MarkdownRenderConfig(
     val allowImages: Boolean = false,
     val overrideForeground: Color? = null,
     val fontScale: Float? = null,
+    val useEnhancedCodeBlocks: Boolean = false,  // 是否使用增强的代码块渲染
 )
 
 object MarkdownRenderer {
@@ -53,25 +55,87 @@ object MarkdownRenderer {
         val htmlBody = renderer.render(document)
         val colorForeground = colorToCss(config.overrideForeground ?: JBColor.foreground())
         val colorBackground = "transparent"
-        val baseFont = JBUI.Fonts.label()
-        val fontFamily = baseFont.family
         
-        // Get font size from settings
-        val fontSize = ClaudeSettings.getInstance().markdownFontSize
-        val codeFontSize = maxOf(fontSize - 1, 8) // Code font is 1px smaller, minimum 8px
-
+        // 使用字体管理器获取与编辑器一致的字体设置
+        val settings = ClaudeSettings.getInstance()
+        val fontSizeAdjustment = if (settings.syncWithEditorFont) {
+            0  // 使用编辑器字体大小，不做调整
+        } else {
+            // 使用用户设置的绝对字体大小，而不是相对调整
+            val editorFontSize = FontManager.getEditorFontInfo().fontSize
+            val targetSize = settings.markdownFontSize
+            // 如果目标大小合理，使用相对调整；否则使用默认调整
+            if (targetSize in 8..24) {
+                targetSize - editorFontSize
+            } else {
+                -1  // 默认稍微小一点
+            }
+        }
+        val textFontInfo = FontManager.getMarkdownTextFontInfo(fontSizeAdjustment, settings.markdownLineSpacing)
+        val codeFontInfo = FontManager.getMarkdownCodeFontInfo()
+        val inlineCodeFontInfo = FontManager.getMarkdownInlineCodeFontInfo(textFontInfo)
+        
+        // 应用 UI 缩放
+        val scaledTextFont = FontManager.scaleFont(textFontInfo)
+        val scaledCodeFont = FontManager.scaleFont(codeFontInfo)
+        val scaledInlineCodeFont = FontManager.scaleFont(inlineCodeFontInfo)
+        
         val css = """
             <style>
-              body { margin: 0; color: $colorForeground; background: $colorBackground; font-family: ${fontFamily}, sans-serif; font-size: ${fontSize}px; }
-              pre, code { font-family: Menlo, Monaco, Consolas, monospace; font-size: ${codeFontSize}px; }
-              /* 尽量使用 Swing 支持的 CSS 子集，避免解析异常 */
-              pre { background-color: rgba(0,0,0,0.05); padding: 6px 8px; white-space: pre-wrap; margin: 0.25em 0; }
-              code { background-color: rgba(0,0,0,0.06); padding: 1px 3px; }
-              p { margin: 0.25em 0; }
-              ul, ol { margin-top: 2px; margin-bottom: 2px; }
-              table { width: 100%; }
-              th, td { border: 1px solid rgba(127,127,127,0.35); padding: 4px 6px; }
-              a { color: #6aa9ff; text-decoration: none; }
+              body { 
+                margin: 0; 
+                color: $colorForeground; 
+                background: $colorBackground; 
+                ${FontManager.createTextCssFontStyle(scaledTextFont)}
+              }
+              /* 代码块样式 */
+              pre { 
+                ${FontManager.createCodeCssFontStyle(scaledCodeFont)}
+                background-color: rgba(0,0,0,0.05); 
+                padding: 6px 8px; 
+                white-space: pre-wrap; 
+                margin: 0.25em 0; 
+                border-radius: 4px;
+              }
+              /* 内联代码样式 - 与正文大小协调 */
+              code { 
+                ${FontManager.createInlineCodeCssFontStyle(scaledInlineCodeFont)}
+                background-color: rgba(0,0,0,0.06); 
+                padding: 1px 3px; 
+                border-radius: 2px;
+              }
+              /* 代码块内的 code 元素不显示背景色，避免双重背景 */
+              pre code { 
+                background-color: transparent !important; 
+                padding: 0 !important; 
+                border-radius: 0 !important;
+              }
+              p { 
+                margin: 0.25em 0; 
+                line-height: ${scaledTextFont.lineHeight};
+              }
+              ul, ol { 
+                margin-top: 2px; 
+                margin-bottom: 2px; 
+                line-height: ${scaledTextFont.lineHeight};
+              }
+              table { 
+                width: 100%; 
+                border-collapse: collapse;
+              }
+              th, td { 
+                border: 1px solid rgba(127,127,127,0.35); 
+                padding: 4px 6px; 
+                line-height: ${scaledTextFont.lineHeight};
+              }
+              a { 
+                color: #6aa9ff; 
+                text-decoration: none; 
+              }
+              h1, h2, h3, h4, h5, h6 {
+                line-height: ${scaledTextFont.lineHeight * 1.2f};
+                margin: 0.5em 0 0.25em 0;
+              }
             </style>
         """.trimIndent()
 
@@ -120,15 +184,49 @@ object MarkdownRenderer {
     }
 
     fun createComponent(markdown: String, config: MarkdownRenderConfig = MarkdownRenderConfig()): JPanel {
+        val settings = ClaudeSettings.getInstance()
+        
+        // 如果启用了增强代码块渲染（从配置或设置中获取）
+        val useEnhanced = config.useEnhancedCodeBlocks || settings.useEnhancedCodeBlocks
+        if (useEnhanced) {
+            val enhancedConfig = EnhancedMarkdownRenderConfig(
+                allowHeadings = config.allowHeadings,
+                allowImages = config.allowImages,
+                overrideForeground = config.overrideForeground,
+                fontScale = config.fontScale,
+                useIntelliJCodeBlocks = true,
+                showLineNumbers = settings.showCodeBlockLineNumbers,
+                maxCodeBlockHeight = settings.maxCodeBlockHeight
+            )
+            return EnhancedMarkdownRenderer.createComponent(markdown, enhancedConfig)
+        }
+        
+        // 使用原始的 HTML 渲染方式
         val html = toHtml(markdown, config)
-        val fontSize = ClaudeSettings.getInstance().markdownFontSize
+        val fontSizeAdjustment = if (settings.syncWithEditorFont) {
+            0  // 使用编辑器字体大小，不做调整
+        } else {
+            // 使用用户设置的绝对字体大小，而不是相对调整
+            val editorFontSize = FontManager.getEditorFontInfo().fontSize
+            val targetSize = settings.markdownFontSize
+            // 如果目标大小合理，使用相对调整；否则使用默认调整
+            if (targetSize in 8..24) {
+                targetSize - editorFontSize
+            } else {
+                -1  // 默认稍微小一点
+            }
+        }
+        val textFontInfo = FontManager.getMarkdownTextFontInfo(fontSizeAdjustment, settings.markdownLineSpacing)
+        val scaledTextFont = FontManager.scaleFont(textFontInfo)
+        val swingFont = FontManager.getSwingFont(scaledTextFont)
+        
         val editor = object : JEditorPane("text/html", html) {
             override fun getScrollableTracksViewportWidth(): Boolean = true
         }.apply {
             isEditable = false
             isOpaque = false
             putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, true)
-            font = Font(Font.SANS_SERIF, Font.PLAIN, fontSize)  // 使用设置中的字体大小
+            font = swingFont  // 使用与编辑器一致的字体
         }
 
         return JPanel(BorderLayout()).apply {

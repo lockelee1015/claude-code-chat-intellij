@@ -13,9 +13,14 @@ import com.intellij.util.xmlb.XmlSerializerUtil
 class ClaudeSettings : PersistentStateComponent<ClaudeSettings> {
     var claudePath: String = ""
     var environmentVariables: String = ""
-    var markdownFontSize: Int = 11  // Default markdown font size
+    var markdownFontSize: Int = 13  // Default markdown font size
     var debugMode: Boolean = false  // Debug mode for tool development
     var maxMessagesPerSession: Int = 100  // Maximum messages to display per session
+    var useEnhancedCodeBlocks: Boolean = false  // Use IntelliJ editor for code block rendering
+    var showCodeBlockLineNumbers: Boolean = true  // Show line numbers in code blocks
+    var maxCodeBlockHeight: Int = 300  // Maximum height for code blocks in pixels
+    var syncWithEditorFont: Boolean = false  // Sync markdown fonts with editor fonts
+    var markdownLineSpacing: Float = 1.4f  // Line spacing multiplier for markdown content
     
     companion object {
         fun getInstance(): ClaudeSettings {

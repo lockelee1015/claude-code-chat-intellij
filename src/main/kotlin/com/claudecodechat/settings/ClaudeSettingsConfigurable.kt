@@ -7,6 +7,8 @@ import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.JBIntSpinner
+import javax.swing.JSpinner
+import javax.swing.SpinnerNumberModel
 import com.intellij.util.ui.FormBuilder
 import javax.swing.JComponent
 import javax.swing.JPanel
@@ -32,7 +34,12 @@ class ClaudeSettingsConfigurable : Configurable {
                 component.environmentVariables != settings.environmentVariables ||
                 component.markdownFontSize != settings.markdownFontSize ||
                 component.debugMode != settings.debugMode ||
-                component.maxMessagesPerSession != settings.maxMessagesPerSession
+                component.maxMessagesPerSession != settings.maxMessagesPerSession ||
+                component.useEnhancedCodeBlocks != settings.useEnhancedCodeBlocks ||
+                component.showCodeBlockLineNumbers != settings.showCodeBlockLineNumbers ||
+                component.maxCodeBlockHeight != settings.maxCodeBlockHeight ||
+                component.syncWithEditorFont != settings.syncWithEditorFont ||
+                component.markdownLineSpacing != settings.markdownLineSpacing
     }
     
     override fun apply() {
@@ -44,6 +51,11 @@ class ClaudeSettingsConfigurable : Configurable {
         settings.markdownFontSize = component.markdownFontSize
         settings.debugMode = component.debugMode
         settings.maxMessagesPerSession = component.maxMessagesPerSession
+        settings.useEnhancedCodeBlocks = component.useEnhancedCodeBlocks
+        settings.showCodeBlockLineNumbers = component.showCodeBlockLineNumbers
+        settings.maxCodeBlockHeight = component.maxCodeBlockHeight
+        settings.syncWithEditorFont = component.syncWithEditorFont
+        settings.markdownLineSpacing = component.markdownLineSpacing
     }
     
     override fun reset() {
@@ -55,6 +67,11 @@ class ClaudeSettingsConfigurable : Configurable {
         component.markdownFontSize = settings.markdownFontSize
         component.debugMode = settings.debugMode
         component.maxMessagesPerSession = settings.maxMessagesPerSession
+        component.useEnhancedCodeBlocks = settings.useEnhancedCodeBlocks
+        component.showCodeBlockLineNumbers = settings.showCodeBlockLineNumbers
+        component.maxCodeBlockHeight = settings.maxCodeBlockHeight
+        component.syncWithEditorFont = settings.syncWithEditorFont
+        component.markdownLineSpacing = settings.markdownLineSpacing
     }
     
     override fun disposeUIResources() {
@@ -68,6 +85,11 @@ class ClaudeSettingsConfigurable : Configurable {
         private val markdownFontSizeSpinner = JBIntSpinner(11, 8, 24)
         private val debugModeCheckBox = JBCheckBox("Enable debug mode (show tool IDs and debug info)")
         private val maxMessagesSpinner = JBIntSpinner(100, 10, 1000)
+        private val enhancedCodeBlocksCheckBox = JBCheckBox("Use IntelliJ editor for code blocks (with syntax highlighting)")
+        private val showLineNumbersCheckBox = JBCheckBox("Show line numbers in code blocks")
+        private val maxCodeBlockHeightSpinner = JBIntSpinner(300, 100, 800)
+        private val syncWithEditorFontCheckBox = JBCheckBox("Sync markdown fonts with editor fonts")
+        private val markdownLineSpacingSpinner = JSpinner(SpinnerNumberModel(1.4, 1.0, 2.5, 0.1))
         
         init {
             panel = FormBuilder.createFormBuilder()
@@ -98,6 +120,23 @@ class ClaudeSettingsConfigurable : Configurable {
                     false
                 )
                 .addComponent(debugModeCheckBox, 1)
+                .addSeparator(2)
+                .addComponent(JBLabel("Code Block Display Options:"), 1)
+                .addComponent(enhancedCodeBlocksCheckBox, 1)
+                .addComponent(showLineNumbersCheckBox, 1)
+                .addLabeledComponent(
+                    JBLabel("Max Code Block Height (100-800px):"),
+                    maxCodeBlockHeightSpinner,
+                    1,
+                    false
+                )
+                .addComponent(syncWithEditorFontCheckBox, 1)
+                .addLabeledComponent(
+                    JBLabel("Markdown Line Spacing (1.0-2.5):"),
+                    markdownLineSpacingSpinner,
+                    1,
+                    false
+                )
                 .addComponentFillVertically(JPanel(), 0)
                 .panel
         }
@@ -130,6 +169,36 @@ class ClaudeSettingsConfigurable : Configurable {
             get() = maxMessagesSpinner.number
             set(value) {
                 maxMessagesSpinner.number = value
+            }
+        
+        var useEnhancedCodeBlocks: Boolean
+            get() = enhancedCodeBlocksCheckBox.isSelected
+            set(value) {
+                enhancedCodeBlocksCheckBox.isSelected = value
+            }
+        
+        var showCodeBlockLineNumbers: Boolean
+            get() = showLineNumbersCheckBox.isSelected
+            set(value) {
+                showLineNumbersCheckBox.isSelected = value
+            }
+        
+        var maxCodeBlockHeight: Int
+            get() = maxCodeBlockHeightSpinner.number
+            set(value) {
+                maxCodeBlockHeightSpinner.number = value
+            }
+        
+        var syncWithEditorFont: Boolean
+            get() = syncWithEditorFontCheckBox.isSelected
+            set(value) {
+                syncWithEditorFontCheckBox.isSelected = value
+            }
+        
+        var markdownLineSpacing: Float
+            get() = (markdownLineSpacingSpinner.value as Number).toFloat()
+            set(value) {
+                markdownLineSpacingSpinner.value = value
             }
     }
 }
