@@ -1,11 +1,11 @@
 package com.claudecodechat.ui.swing
 
-import com.claudecodechat.completion.CompletionManager
-import com.claudecodechat.completion.CompletionState
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.editor.EditorFactory
+import com.intellij.openapi.editor.*
 import com.intellij.openapi.editor.event.CaretEvent
 import com.intellij.openapi.editor.event.CaretListener
+import com.intellij.openapi.editor.event.DocumentEvent
+import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
@@ -13,17 +13,11 @@ import com.intellij.openapi.project.Project
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBPanel
 import com.intellij.ui.components.JBScrollPane
-import com.intellij.ui.awt.RelativePoint
-import com.intellij.openapi.ui.popup.JBPopup
-import com.intellij.openapi.ui.popup.JBPopupFactory
-import com.intellij.openapi.ui.popup.ComponentPopupBuilder
 import com.intellij.util.ui.JBUI
 import com.intellij.icons.AllIcons
 import com.intellij.ui.AnimatedIcon
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.collect
 import java.awt.*
-import java.awt.event.ActionEvent
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
 import javax.swing.*
@@ -38,11 +32,14 @@ class ChatInputBar(
     private val onStop: (() -> Unit)? = null
 ) : JBPanel<ChatInputBar>(BorderLayout()) {
 
-    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private val completionManager = CompletionManager(project)
+    init {
+    }
 
-    // UI
-    private val inputArea: JTextArea = JTextArea(4, 50)
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+
+    // UI - Using IntelliJ Editor instead of JTextArea
+    private lateinit var inputEditor: Editor
+    private lateinit var inputDocument: Document
     private val modelComboBox: JComboBox<String> = JComboBox(arrayOf("auto", "sonnet", "opus", "haiku"))
     private val sendButton: JButton = JButton().apply {
         icon = AllIcons.Actions.Execute
@@ -53,6 +50,7 @@ class ChatInputBar(
         }
         preferredSize = Dimension(40, 28)
     }
+
     private val currentFileLabel: JLabel = JLabel("")
     
     // Context status bar
@@ -74,116 +72,25 @@ class ChatInputBar(
     private var startTime: Long = 0
     private var timerJob: Job? = null
 
-    // Completion UI
-    private val completionList: JList<String> = JList()
-    private var completionPopup: JBPopup? = null
-    private var currentCompletionState: CompletionState? = null
-    private var currentSelectedIndex: Int = 0
+    // Native IntelliJ completion will be handled automatically
 
     init {
         background = JBColor.background()
         border = JBUI.Borders.empty()
 
-        // Input config
-        inputArea.lineWrap = true
-        inputArea.wrapStyleWord = true
-        inputArea.font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
-        
-        // Override default key bindings for up/down arrows when completion is active
-        setupCompletionKeyBindings()
-        inputArea.addKeyListener(object : KeyAdapter() {
-            override fun keyPressed(e: KeyEvent) {
-                // Check completion state first for navigation keys
-                val state = currentCompletionState
-                val hasCompletion = state != null && state.isShowing && state.items.isNotEmpty()
-                
-                // Debug logging
-                if (e.keyCode == KeyEvent.VK_UP || e.keyCode == KeyEvent.VK_DOWN) {
-                    println("DEBUG: UP/DOWN pressed - state=$state, hasCompletion=$hasCompletion, popupVisible=${completionPopup?.isVisible}")
-                }
-                
-                when {
-                    // Handle completion navigation first (highest priority)
-                    hasCompletion && (e.keyCode == KeyEvent.VK_UP || e.keyCode == KeyEvent.VK_DOWN) -> {
-                        val currentIndex = completionList.selectedIndex
-                        val newIndex = when (e.keyCode) {
-                            KeyEvent.VK_UP -> if (currentIndex > 0) currentIndex - 1 else state.items.size - 1
-                            KeyEvent.VK_DOWN -> if (currentIndex < state.items.size - 1) currentIndex + 1 else 0
-                            else -> currentIndex
-                        }
-                        completionList.selectedIndex = newIndex
-                        completionList.ensureIndexIsVisible(newIndex)
-                        currentSelectedIndex = newIndex
-                        e.consume() // Prevent inputArea from handling up/down keys
-                    }
-                    // Handle completion selection
-                    hasCompletion && (e.keyCode == KeyEvent.VK_TAB || e.keyCode == KeyEvent.VK_ENTER) -> {
-                        applySelectedCompletion()
-                        e.consume()
-                    }
-                    // Handle completion dismissal
-                    e.keyCode == KeyEvent.VK_ESCAPE -> {
-                        if (hasCompletion) {
-                            hideCompletion()
-                        }
-                        e.consume()
-                    }
-                    // Handle send message
-                    e.keyCode == KeyEvent.VK_ENTER && (e.isControlDown || e.isMetaDown) -> {
-                        sendMessage()
-                        e.consume()
-                    }
-                    // Handle plan mode toggle
-                    e.keyCode == KeyEvent.VK_TAB && e.isShiftDown -> {
-                        togglePlanMode()
-                        e.consume()
-                    }
-                }
-            }
-            override fun keyReleased(e: KeyEvent) {
-                // Only update completion for normal typing, not for modifier key combinations or navigation keys
-                if (!e.isControlDown && !e.isAltDown && !e.isMetaDown && !e.isShiftDown && 
-                    e.keyCode != KeyEvent.VK_UP && e.keyCode != KeyEvent.VK_DOWN && 
-                    e.keyCode != KeyEvent.VK_ENTER && e.keyCode != KeyEvent.VK_TAB && 
-                    e.keyCode != KeyEvent.VK_ESCAPE) {
-                    updateCompletion()
-                }
-            }
-        })
-        inputArea.document.addDocumentListener(object : javax.swing.event.DocumentListener {
-            override fun insertUpdate(e: javax.swing.event.DocumentEvent) = updateCompletion()
-            override fun removeUpdate(e: javax.swing.event.DocumentEvent) = updateCompletion()
-            override fun changedUpdate(e: javax.swing.event.DocumentEvent) = updateCompletion()
-        })
+        // Native completion will be handled automatically by IntelliJ
 
-        // Completion list (minimal setup for popup)
-        completionList.selectionMode = ListSelectionModel.SINGLE_SELECTION
-        completionList.background = JBColor.background()
-        completionList.foreground = JBColor.foreground()
-        completionList.font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
-        
-        // Add keyboard support to completion list
-        completionList.addKeyListener(object : KeyAdapter() {
-            override fun keyPressed(e: KeyEvent) {
-                when (e.keyCode) {
-                    KeyEvent.VK_ENTER, KeyEvent.VK_TAB -> {
-                        applySelectedCompletion()
-                        e.consume()
-                    }
-                    KeyEvent.VK_ESCAPE -> {
-                        hideCompletion()
-                        inputArea.requestFocus()
-                        e.consume()
-                    }
-                }
-            }
-        })
+        // Create input editor
+        val (editor, document) = createInputEditor()
+        inputEditor = editor
+        inputDocument = document
+
 
         // Setup loading panel
         setupLoadingPanel()
 
-        // Layout
-        val inputScroll = JBScrollPane(inputArea).apply {
+        // Layout - Use Editor component
+        val inputScroll = JBScrollPane(inputEditor.component).apply {
             preferredSize = Dimension(600, 100)
             verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
             horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
@@ -191,7 +98,7 @@ class ChatInputBar(
         }
         
         // Add focus listener to change border color
-        inputArea.addFocusListener(object : java.awt.event.FocusListener {
+        inputEditor.contentComponent.addFocusListener(object : java.awt.event.FocusListener {
             override fun focusGained(e: java.awt.event.FocusEvent?) {
                 inputScroll.border = createRoundedBorder(JBColor.BLUE, 2, 8)
             }
@@ -247,110 +154,131 @@ class ChatInputBar(
 
         // Actions
         sendButton.addActionListener { sendMessage() }
-        observeCompletion()
         setupFileInfoTracking()
     }
     
     /**
-     * Setup key bindings to override JTextArea's default behavior for completion navigation
+     * Create IntelliJ Editor for chat input with PSI support using actual file
      */
-    private fun setupCompletionKeyBindings() {
-        val inputMap = inputArea.getInputMap(JComponent.WHEN_FOCUSED)
-        val actionMap = inputArea.actionMap
+    private fun createInputEditor(): Pair<Editor, Document> {
+        // Create actual file for better PSI support
+        val projectBasePath = project.basePath ?: System.getProperty("user.home")
+        val chatInputDir = java.io.File(projectBasePath, ".chat-input")
+        if (!chatInputDir.exists()) {
+            chatInputDir.mkdirs()
+        }
+
+        val chatInputFile = java.io.File(chatInputDir, "chat-input.md")
+        if (!chatInputFile.exists()) {
+            chatInputFile.writeText("")
+        }
+
+        // Get the virtual file from the actual file
+        val virtualFile = com.intellij.openapi.vfs.LocalFileSystem.getInstance().findFileByIoFile(chatInputFile)
+            ?: throw IllegalStateException("Cannot find virtual file for ${chatInputFile.absolutePath}")
+
+        // Create document from the file
+        val document = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance().getDocument(virtualFile)
+            ?: throw IllegalStateException("Cannot create document for file")
+
+        val editor = EditorFactory.getInstance().createEditor(document, project, virtualFile, false)
+
+        // Configure editor settings
+        configureInputEditor(editor)
+
+        // Add document listener for text changes
+        document.addDocumentListener(object : DocumentListener {
+            override fun documentChanged(event: DocumentEvent) {
+                // Document change handling if needed
+            }
+        })
         
-        // Override UP key
-        inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_UP, 0), "completion-up")
-        actionMap.put("completion-up", object : AbstractAction() {
-            override fun actionPerformed(e: ActionEvent) {
-                val state = currentCompletionState
-                if (state != null && state.isShowing && state.items.isNotEmpty()) {
-                    val currentIndex = completionList.selectedIndex
-                    val newIndex = if (currentIndex > 0) currentIndex - 1 else state.items.size - 1
-                    completionList.selectedIndex = newIndex
-                    completionList.ensureIndexIsVisible(newIndex)
-                    currentSelectedIndex = newIndex
-                } else {
-                    // Default behavior: move cursor up
-                    val pos = inputArea.caretPosition
-                    try {
-                        val line = inputArea.getLineOfOffset(pos)
-                        if (line > 0) {
-                            val prevLineStart = inputArea.getLineStartOffset(line - 1)
-                            val prevLineEnd = inputArea.getLineEndOffset(line - 1)
-                            val currentLineStart = inputArea.getLineStartOffset(line)
-                            val offsetInLine = pos - currentLineStart
-                            val newPos = minOf(prevLineStart + offsetInLine, prevLineEnd)
-                            inputArea.caretPosition = newPos
+        // Auto-trigger completion on / and @ characters
+        var lastInsertedChar: Char? = null
+        document.addDocumentListener(object : DocumentListener {
+            override fun documentChanged(event: DocumentEvent) {
+                // Only trigger on single character insertion at the end of document
+                if (event.newLength == 1 && event.oldLength == 0) {
+                    val insertedChar = document.text.getOrNull(event.offset)
+                    if (insertedChar == '/' || insertedChar == '@') {
+                        lastInsertedChar = insertedChar
+                        // Delay the completion trigger to avoid interference
+                        javax.swing.SwingUtilities.invokeLater {
+                            ApplicationManager.getApplication().invokeLater {
+                                // Double-check we're still in the right state
+                                if (lastInsertedChar == insertedChar && editor.caretModel.offset == event.offset + 1) {
+                                    try {
+                                        val handler = com.intellij.codeInsight.completion.CodeCompletionHandlerBase.createHandler(
+                                            com.intellij.codeInsight.completion.CompletionType.BASIC
+                                        )
+                                        handler.invokeCompletion(project, editor)
+                                    } catch (e: Exception) {
+                                        // Silently ignore completion errors
+                                    }
+                                    lastInsertedChar = null
+                                }
+                            }
                         }
-                    } catch (ex: Exception) {
-                        // If anything goes wrong, just move to beginning
-                        inputArea.caretPosition = maxOf(0, pos - 1)
                     }
                 }
             }
         })
+
+
+        return Pair(editor, document)
+    }
+    
+    /**
+     * Configure editor settings for chat input
+     */
+    private fun configureInputEditor(editor: Editor) {
+        val settings = editor.settings
         
-        // Override DOWN key
-        inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_DOWN, 0), "completion-down")
-        actionMap.put("completion-down", object : AbstractAction() {
-            override fun actionPerformed(e: ActionEvent) {
-                val state = currentCompletionState
-                if (state != null && state.isShowing && state.items.isNotEmpty()) {
-                    val currentIndex = completionList.selectedIndex
-                    val newIndex = if (currentIndex < state.items.size - 1) currentIndex + 1 else 0
-                    completionList.selectedIndex = newIndex
-                    completionList.ensureIndexIsVisible(newIndex)
-                    currentSelectedIndex = newIndex
-                } else {
-                    // Default behavior: move cursor down
-                    val pos = inputArea.caretPosition
-                    try {
-                        val line = inputArea.getLineOfOffset(pos)
-                        val lineCount = inputArea.lineCount
-                        if (line < lineCount - 1) {
-                            val nextLineStart = inputArea.getLineStartOffset(line + 1)
-                            val nextLineEnd = inputArea.getLineEndOffset(line + 1)
-                            val currentLineStart = inputArea.getLineStartOffset(line)
-                            val offsetInLine = pos - currentLineStart
-                            val newPos = minOf(nextLineStart + offsetInLine, nextLineEnd)
-                            inputArea.caretPosition = newPos
-                        }
-                    } catch (ex: Exception) {
-                        // If anything goes wrong, just move to end
-                        inputArea.caretPosition = minOf(inputArea.text.length, pos + 1)
+        // Basic settings
+        settings.isLineNumbersShown = false
+        settings.isFoldingOutlineShown = false
+        settings.isAutoCodeFoldingEnabled = false
+        settings.isRightMarginShown = false
+        settings.isWhitespacesShown = false
+        settings.isIndentGuidesShown = false
+        settings.additionalLinesCount = 0
+        settings.additionalColumnsCount = 0
+        settings.isCaretRowShown = false
+        
+        // Multi-line and wrapping
+        settings.isUseSoftWraps = true
+        
+        // Note: Some completion settings may not be available in EditorSettings
+        
+        // Set preferred size
+        editor.component.preferredSize = Dimension(600, 100)
+        editor.component.minimumSize = Dimension(400, 60)
+        
+        // Add key handlers for special keys (Ctrl+Enter for send)
+        setupEditorKeyHandlers(editor)
+    }
+    
+    /**
+     * Setup key handlers for the editor
+     */
+    private fun setupEditorKeyHandlers(editor: Editor) {
+        // Add typed handler for send on Ctrl+Enter
+        editor.contentComponent.addKeyListener(object : KeyAdapter() {
+            override fun keyPressed(e: KeyEvent) {
+                when {
+                    e.keyCode == KeyEvent.VK_ENTER && (e.isControlDown || e.isMetaDown) -> {
+                        sendMessage()
+                        e.consume()
                     }
-                }
-            }
-        })
-        
-        // Override TAB key for completion
-        inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_TAB, 0), "completion-tab")
-        actionMap.put("completion-tab", object : AbstractAction() {
-            override fun actionPerformed(e: ActionEvent) {
-                val state = currentCompletionState
-                if (state != null && state.isShowing && state.items.isNotEmpty()) {
-                    applySelectedCompletion()
-                } else {
-                    // Default behavior: insert tab or spaces
-                    inputArea.replaceSelection("    ") // 4 spaces
-                }
-            }
-        })
-        
-        // Override ENTER key for completion (but not Ctrl+Enter)
-        inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), "completion-enter")
-        actionMap.put("completion-enter", object : AbstractAction() {
-            override fun actionPerformed(e: ActionEvent) {
-                val state = currentCompletionState
-                if (state != null && state.isShowing && state.items.isNotEmpty()) {
-                    applySelectedCompletion()
-                } else {
-                    // Default behavior: insert newline
-                    inputArea.replaceSelection("\n")
+                    e.keyCode == KeyEvent.VK_TAB && e.isShiftDown -> {
+                        togglePlanMode()
+                        e.consume()
+                    }
                 }
             }
         })
     }
+    
     
     /**
      * Create a rounded border
@@ -382,15 +310,22 @@ class ChatInputBar(
     }
 
 
-    fun requestInputFocus() { inputArea.requestFocus() }
-    fun setText(text: String) { inputArea.text = text }
-    fun getText(): String = inputArea.text
-    fun getCaretPosition(): Int = inputArea.caretPosition
-    fun setCaretPosition(pos: Int) { inputArea.caretPosition = pos }
+    fun requestInputFocus() { inputEditor.contentComponent.requestFocus() }
+    fun setText(text: String) {
+        com.intellij.openapi.application.ApplicationManager.getApplication().runWriteAction {
+            inputDocument.setText(text)
+        }
+    }
+    fun getText(): String = inputDocument.text
+    fun getCaretPosition(): Int = inputEditor.caretModel.offset
+    fun setCaretPosition(pos: Int) { inputEditor.caretModel.moveToOffset(pos) }
     fun appendText(text: String) {
-        val current = inputArea.text
-        inputArea.text = if (current.isEmpty()) text else "$current\n\n$text"
-        inputArea.caretPosition = inputArea.text.length
+        com.intellij.openapi.application.ApplicationManager.getApplication().runWriteAction {
+            val current = inputDocument.text
+            val newText = if (current.isEmpty()) text else "$current\n\n$text"
+            inputDocument.setText(newText)
+            inputEditor.caretModel.moveToOffset(newText.length)
+        }
     }
     
     /**
@@ -435,8 +370,6 @@ class ChatInputBar(
             }
         }
         
-        println("DEBUG: updateTokenUsage called with input=$inputTokens, output=$outputTokens, cacheRead=$cacheReadTokens, cacheCreation=$cacheCreationTokens")
-        println("DEBUG: Setting context label text: $displayText")
         contextLabel.text = displayText
     }
     
@@ -500,138 +433,21 @@ class ChatInputBar(
     fun isPlanModeEnabled(): Boolean = planModeCheckBox.isSelected
 
     private fun sendMessage() {
-        val text = inputArea.text.trim()
+        val text = inputDocument.text.trim()
         if (text.isEmpty()) return
         val model = (modelComboBox.selectedItem as? String) ?: "auto"
         
         // Show loading state
         showLoading(text)
         
-        inputArea.text = ""
-        hideCompletion()
+        // Clear input in write action
+        com.intellij.openapi.application.ApplicationManager.getApplication().runWriteAction {
+            inputDocument.setText("")
+        }
         onSend(text, model, planModeCheckBox.isSelected)
     }
 
-    private fun updateCompletion() {
-        val text = inputArea.text
-        val cursorPos = inputArea.caretPosition
-        completionManager.updateCompletion(text, cursorPos)
-    }
 
-    private fun observeCompletion() {
-        scope.launch {
-            completionManager.completionState.collect { state ->
-                handleCompletionState(state)
-            }
-        }
-    }
-
-    private fun handleCompletionState(state: CompletionState) {
-        // Always update current completion state
-        currentCompletionState = state
-        
-        if (state.isShowing && state.items.isNotEmpty()) {
-            showCompletionPopup(state)
-        } else {
-            hideCompletion()
-        }
-    }
-
-    private fun showCompletionPopup(state: CompletionState) {
-        currentCompletionState = state
-        currentSelectedIndex = state.selectedIndex
-        
-        // Close existing popup
-        completionPopup?.cancel()
-        
-
-        
-        val items = state.items.map { item ->
-            when (item) {
-                is com.claudecodechat.completion.CompletionItem.SlashCommand -> {
-                    "/${item.name} - ${item.description}"
-                }
-                is com.claudecodechat.completion.CompletionItem.FileReference -> {
-                    "${item.fileName} - ${item.relativePath}"
-                }
-            }
-        }
-        
-        // Update the JList model and selection
-        val listModel = DefaultListModel<String>()
-        items.forEach { listModel.addElement(it) }
-        completionList.model = listModel
-        completionList.selectedIndex = currentSelectedIndex
-        
-        // Create scrollable popup using ComponentPopupBuilder
-        val scrollPane = JBScrollPane(completionList).apply {
-            // Height for ~8 items (25px per item + padding)
-            preferredSize = Dimension(inputArea.width, 220)
-            verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
-            horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
-            border = JBUI.Borders.empty()
-        }
-        
-        completionPopup = JBPopupFactory.getInstance().createComponentPopupBuilder(scrollPane, completionList)
-            .setTitle("Completions")
-            .setMovable(false)
-            .setResizable(false)
-            .setRequestFocus(false)
-            .addListener(object : com.intellij.openapi.ui.popup.JBPopupListener {
-                override fun onClosed(event: com.intellij.openapi.ui.popup.LightweightWindowEvent) {
-                    completionPopup = null
-                    currentCompletionState = null
-                }
-            })
-            .createPopup()
-        
-        // Calculate popup position and size to align perfectly with input area
-        val inputBounds = inputArea.bounds
-        val inputLocationOnScreen = inputArea.locationOnScreen
-        
-        // Position popup directly above the input area with more space
-        val popupX = inputLocationOnScreen.x
-        val popupY = inputLocationOnScreen.y - 220 - 40 // 10px gap above 220px height
-        
-        completionPopup?.showInScreenCoordinates(inputArea, Point(popupX, popupY))
-    }
-
-    private fun applySelectedCompletion() {
-        val state = currentCompletionState ?: return
-        val selectedIndex = completionList.selectedIndex
-        if (selectedIndex in 0 until state.items.size) {
-            applyCompletion(state, selectedIndex)
-        }
-    }
-
-    private fun applyCompletion(state: CompletionState, selectedIndex: Int) {
-        val selectedItem = state.items[selectedIndex]
-        val currentText = inputArea.text
-        val triggerPos = state.triggerPosition
-        val newText = when (selectedItem) {
-            is com.claudecodechat.completion.CompletionItem.SlashCommand -> {
-                val before = currentText.substring(0, triggerPos)
-                val after = currentText.substring(inputArea.caretPosition)
-                before + "/${selectedItem.name} " + after
-            }
-            is com.claudecodechat.completion.CompletionItem.FileReference -> {
-                val before = currentText.substring(0, triggerPos)
-                val after = currentText.substring(inputArea.caretPosition)
-                before + "@${selectedItem.relativePath} " + after
-            }
-            else -> currentText
-        }
-        inputArea.text = newText
-        inputArea.caretPosition = triggerPos + newText.substring(triggerPos).indexOf(' ') + 1
-        hideCompletion()
-    }
-
-    private fun hideCompletion() {
-        completionPopup?.cancel()
-        completionPopup = null
-        // Don't clear currentCompletionState here - let handleCompletionState manage it
-        completionManager.hideCompletion()
-    }
 
     private fun setupFileInfoTracking() {
         currentFileLabel.font = Font(Font.SANS_SERIF, Font.PLAIN, 11)
@@ -782,6 +598,13 @@ class ChatInputBar(
             // Initially hidden
             isVisible = false
         }
+    }
+    
+    /**
+     * Clean up resources when the component is disposed
+     */
+    fun dispose() {
+        scope.cancel()
     }
 }
 

@@ -37,8 +37,20 @@ import java.awt.event.MouseEvent
  * Uses stable Swing components for maximum compatibility across IntelliJ versions
  */
 class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
-    
+
+    init {
+        println("=== DEBUG: ClaudeChatSimpleToolWindowFactory initialized ===")
+    }
+
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
+        println("=== DEBUG: Creating tool window content ===")
+
+        // Manually register completion contributor
+        println("DEBUG: Manually registering ChatCompletionContributor")
+        val completionContributor = com.claudecodechat.completion.ChatCompletionContributor()
+        completionContributor.initialize(project)
+        println("DEBUG: ChatCompletionContributor registered manually")
+
         val sessionPersistence = SessionPersistence.getInstance(project)
         
         // Restore saved tabs or show welcome by default

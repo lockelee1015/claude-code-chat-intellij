@@ -68,6 +68,18 @@
         <notificationGroup id="Claude Code Chat"
                           displayType="BALLOON"
                           key="claude.code.chat.notification.group"/>
+                          
+        <!-- File Type Registration -->
+        <fileType name="Chat"
+                  implementationClass="com.claudecodechat.completion.ChatFileType"
+                  fieldName="INSTANCE"
+                  language="TEXT"
+                  extensions="chat"/>
+                  
+        <!-- Chat Completion Contributor -->
+        <completion.contributor
+                language="Markdown"
+                implementationClass="com.claudecodechat.completion.ChatCompletionContributor"/>
     </extensions>
     
     <actions>
