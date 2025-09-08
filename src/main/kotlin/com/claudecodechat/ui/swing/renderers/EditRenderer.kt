@@ -262,9 +262,15 @@ class EditRenderer : ToolRenderer() {
      */
     private fun createDeletedTextAttributes(): TextAttributes {
         return TextAttributes().apply {
-            backgroundColor = Color(255, 220, 220) // Light red background
+            backgroundColor = JBColor(
+                Color(255, 220, 220),  // 浅色主题：浅红色
+                Color(50, 30, 30)      // 深色主题：深红色
+            )
             effectType = EffectType.STRIKEOUT
-            effectColor = Color(160, 20, 20) // Dark red strike-through
+            effectColor = JBColor(
+                Color(160, 20, 20),    // 浅色主题：深红色删除线
+                Color(200, 100, 100)   // 深色主题：浅红色删除线
+            )
         }
     }
     
@@ -273,7 +279,10 @@ class EditRenderer : ToolRenderer() {
      */
     private fun createAddedTextAttributes(): TextAttributes {
         return TextAttributes().apply {
-            backgroundColor = Color(220, 255, 220) // Light green background
+            backgroundColor = JBColor(
+                Color(220, 255, 220),  // 浅色主题：浅绿色
+                Color(30, 50, 30)      // 深色主题：深绿色
+            )
         }
     }
     
@@ -282,9 +291,17 @@ class EditRenderer : ToolRenderer() {
      */
     private fun highlightLine(markupModel: MarkupModel, startOffset: Int, endOffset: Int, isAdded: Boolean) {
         val color = if (isAdded) {
-            Color(200, 255, 200) // Light green for added/modified lines
+            // 绿色高亮，适配深色和浅色主题
+            JBColor(
+                Color(200, 255, 200),  // 浅色主题：浅绿色
+                Color(40, 60, 40)      // 深色主题：深绿色
+            )
         } else {
-            Color(255, 200, 200) // Light red for deleted lines (not used in this context)
+            // 红色高亮，适配深色和浅色主题
+            JBColor(
+                Color(255, 200, 200),  // 浅色主题：浅红色
+                Color(60, 40, 40)      // 深色主题：深红色
+            )
         }
         
         val textAttributes = TextAttributes().apply {
@@ -354,7 +371,10 @@ class EditRenderer : ToolRenderer() {
             
             // Create header to indicate deletion
             val headerPanel = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, 8, 4)).apply {
-                background = Color(255, 235, 235, 180) // Light red background
+                background = JBColor(
+                    Color(255, 235, 235, 180),  // 浅色主题：浅红色半透明
+                    Color(60, 40, 40, 180)      // 深色主题：深红色半透明
+                )
                 
                 val deleteIcon = JBLabel("🗑").apply {
                     font = Font(Font.SANS_SERIF, Font.PLAIN, 14)
@@ -362,7 +382,10 @@ class EditRenderer : ToolRenderer() {
                 
                 val deleteLabel = JBLabel("Deleted content:").apply {
                     font = Font(Font.SANS_SERIF, Font.BOLD, 11)
-                    foreground = Color(160, 20, 20) // Dark red
+                    foreground = JBColor(
+                        Color(160, 20, 20),     // 浅色主题：深红色
+                        Color(220, 120, 120)    // 深色主题：浅红色
+                    )
                 }
                 
                 add(deleteIcon)
@@ -402,7 +425,10 @@ class EditRenderer : ToolRenderer() {
             
             // Create header to indicate addition
             val headerPanel = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, 8, 4)).apply {
-                background = Color(235, 255, 235, 180) // Light green background
+                background = JBColor(
+                    Color(235, 255, 235, 180),  // 浅色主题：浅绿色半透明
+                    Color(40, 60, 40, 180)      // 深色主题：深绿色半透明
+                )
                 
                 val addIcon = JBLabel("➕").apply {
                     font = Font(Font.SANS_SERIF, Font.PLAIN, 14)
@@ -410,7 +436,10 @@ class EditRenderer : ToolRenderer() {
                 
                 val addLabel = JBLabel("Added content:").apply {
                     font = Font(Font.SANS_SERIF, Font.BOLD, 11)
-                    foreground = Color(20, 120, 20) // Dark green
+                    foreground = JBColor(
+                        Color(20, 120, 20),     // 浅色主题：深绿色
+                        Color(120, 200, 120)    // 深色主题：浅绿色
+                    )
                 }
                 
                 add(addIcon)
@@ -589,7 +618,10 @@ class EditRenderer : ToolRenderer() {
             border = JBUI.Borders.empty(8)
             
             val errorLabel = JBLabel("Error: $errorMessage").apply {
-                foreground = Color(220, 38, 38)
+                foreground = JBColor(
+                    Color(220, 38, 38),     // 浅色主题：红色
+                    Color(255, 120, 120)    // 深色主题：浅红色
+                )
                 font = Font(Font.MONOSPACED, Font.PLAIN, 11)
             }
             

@@ -94,17 +94,14 @@ object FontManager {
      */
     fun createCssFontStyle(fontInfo: EditorFontInfo): String {
         val lineHeightValue = fontInfo.lineHeight
-        val letterSpacingValue = if (fontInfo.letterSpacing != 0f) {
-            "${fontInfo.letterSpacing}px"
-        } else {
-            "normal"
-        }
+        
+        // 简化字体名称，避免特殊字符导致解析问题
+        val safeFontFamily = fontInfo.fontFamily.replace("'", "").replace("\"", "")
         
         return """
-            font-family: '${fontInfo.fontFamily}', monospace;
+            font-family: ${safeFontFamily}, monospace;
             font-size: ${fontInfo.fontSize}px;
             line-height: ${lineHeightValue};
-            letter-spacing: ${letterSpacingValue};
         """.trimIndent()
     }
     
@@ -113,17 +110,14 @@ object FontManager {
      */
     fun createTextCssFontStyle(fontInfo: EditorFontInfo): String {
         val lineHeightValue = fontInfo.lineHeight
-        val letterSpacingValue = if (fontInfo.letterSpacing != 0f) {
-            "${fontInfo.letterSpacing}px"
-        } else {
-            "normal"
-        }
+        
+        // 简化字体名称，避免特殊字符导致解析问题
+        val safeFontFamily = fontInfo.fontFamily.replace("'", "").replace("\"", "")
         
         return """
-            font-family: '${fontInfo.fontFamily}', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: ${safeFontFamily}, sans-serif;
             font-size: ${fontInfo.fontSize}px;
             line-height: ${lineHeightValue};
-            letter-spacing: ${letterSpacingValue};
         """.trimIndent()
     }
     
@@ -132,17 +126,14 @@ object FontManager {
      */
     fun createCodeCssFontStyle(fontInfo: EditorFontInfo): String {
         val lineHeightValue = fontInfo.lineHeight
-        val letterSpacingValue = if (fontInfo.letterSpacing != 0f) {
-            "${fontInfo.letterSpacing}px"
-        } else {
-            "normal"
-        }
+        
+        // 简化字体名称，避免特殊字符导致解析问题
+        val safeFontFamily = fontInfo.fontFamily.replace("'", "").replace("\"", "")
         
         return """
-            font-family: '${fontInfo.fontFamily}', 'JetBrains Mono', Menlo, Monaco, Consolas, 'Courier New', monospace;
+            font-family: ${safeFontFamily}, monospace;
             font-size: ${fontInfo.fontSize}px;
             line-height: ${lineHeightValue};
-            letter-spacing: ${letterSpacingValue};
         """.trimIndent()
     }
     
@@ -151,17 +142,14 @@ object FontManager {
      */
     fun createInlineCodeCssFontStyle(fontInfo: EditorFontInfo): String {
         val lineHeightValue = fontInfo.lineHeight
-        val letterSpacingValue = if (fontInfo.letterSpacing != 0f) {
-            "${fontInfo.letterSpacing}px"
-        } else {
-            "normal"
-        }
+        
+        // 简化字体名称，避免特殊字符导致解析问题
+        val safeFontFamily = fontInfo.fontFamily.replace("'", "").replace("\"", "")
         
         return """
-            font-family: '${fontInfo.fontFamily}', 'JetBrains Mono', Menlo, Monaco, Consolas, 'Courier New', monospace;
+            font-family: ${safeFontFamily}, monospace;
             font-size: ${fontInfo.fontSize}px;
             line-height: ${lineHeightValue};
-            letter-spacing: ${letterSpacingValue};
         """.trimIndent()
     }
     
