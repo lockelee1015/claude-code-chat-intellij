@@ -301,20 +301,14 @@ class ClaudeCliService(private val project: Project) {
         
         // Session management
         when {
-            options.resume && options.sessionId != null -> {
-                // 使用 --resume 来恢复特定的 session
+            options.sessionId != null -> {
+                // 如果有 sessionId，总是使用 --resume 来恢复该 session
                 logger.info("Using --resume with sessionId: ${options.sessionId}")
                 args.add("--resume")
                 args.add(options.sessionId)
             }
-            options.sessionId != null -> {
-                // 使用 --session-id 来指定特定的 session ID
-                logger.info("Using --session-id: ${options.sessionId}")
-                args.add("--session-id")
-                args.add(options.sessionId)
-            }
             options.continueSession -> {
-                // 只有在没有指定 sessionId 时才使用 -c
+                // 如果没有 sessionId 但要继续会话，使用 -c 继续最近的 session
                 logger.info("Using -c to continue most recent session")
                 args.add("-c")
             }

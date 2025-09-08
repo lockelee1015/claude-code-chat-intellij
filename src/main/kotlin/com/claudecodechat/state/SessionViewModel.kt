@@ -203,8 +203,8 @@ class SessionViewModel(private val project: Project) : Disposable {
                     prompt = prompt,
                     model = model,
                     sessionId = currentSessionId,
-                    resume = currentSessionId != null, // 如果有 sessionId 就使用 resume
-                    continueSession = false, // 不使用 -c，而是明确指定 session
+                    resume = false, // 不再使用这个参数，CLI逻辑会自动处理
+                    continueSession = false, // 不使用 -c，让用户明确控制session创建
                     verbose = true,
                     skipPermissions = true,
                     permissionMode = if (planMode) "plan" else null
