@@ -393,7 +393,7 @@ class ToolCardRenderer {
                 appendLine("-".repeat(30))
                 // Pretty print JSON if possible
                 try {
-                    val formattedJson = prettyJson.encodeToString(kotlinx.serialization.json.JsonElement.serializer(), toolInput)
+                    val formattedJson = prettyJson.encodeToString(JsonElement.serializer(), toolInput)
                     appendLine(formattedJson)
                 } catch (e: Exception) {
                     appendLine(toolInput.toString())

@@ -64,7 +64,7 @@ class SessionFileWatcher(private val project: Project) : Disposable {
     
     private fun isProjectSession(file: VirtualFile): Boolean {
         val projectPath = project.basePath ?: return false
-        val sessionLoader = SessionHistoryLoader()
+        SessionHistoryLoader()
         
         // Check if this file belongs to the current project
         val filePath = File(file.path)
@@ -106,7 +106,7 @@ class SessionFileWatcher(private val project: Project) : Disposable {
      * Watch current project's sessions directory
      */
     fun watchProjectSessions(listener: SessionChangeListener) {
-        val projectPath = project.basePath ?: return
+        project.basePath ?: return
         
         // Find the project directory in Claude's projects folder
         val homeDir = System.getProperty("user.home")

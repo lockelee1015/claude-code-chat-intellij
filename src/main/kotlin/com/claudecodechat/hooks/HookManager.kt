@@ -214,7 +214,7 @@ class HookManager(private val project: Project) {
         local: HooksConfiguration?
     ): HooksConfiguration {
         // Start with empty configuration
-        val merged = HooksConfiguration()
+        HooksConfiguration()
         
         // Merge in order of priority (lowest to highest)
         val configs = listOfNotNull(user, project, local)

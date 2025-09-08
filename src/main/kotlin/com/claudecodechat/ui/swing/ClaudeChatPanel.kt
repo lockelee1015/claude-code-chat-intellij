@@ -197,7 +197,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         
         val parts = trimmedText.substring(1).split(" ", limit = 2)
         val command = parts[0].lowercase()
-        val args = if (parts.size > 1) parts[1] else ""
+        if (parts.size > 1) parts[1] else ""
         
         return when (command) {
             "clear" -> {
@@ -253,7 +253,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
      * Add a system message to the chat
      */
     private fun addSystemMessage(content: String) {
-        val messageGroup = MessageGroup(
+        MessageGroup(
             type = "assistant",
             content = content
         )
@@ -797,7 +797,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         val headerLabel = JBLabel("Todos have been modified successfully.").apply {
             foreground = JBColor.foreground()
             font = Font(Font.MONOSPACED, Font.PLAIN, 11)
-            alignmentX = Component.LEFT_ALIGNMENT
+            alignmentX = LEFT_ALIGNMENT
         }
         panel.add(headerLabel)
         panel.add(Box.createVerticalStrut(8))
@@ -827,7 +827,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
             val errorLabel = JBLabel("Failed to parse todo items: ${e.message}").apply {
                 foreground = Color(220, 38, 38)
                 font = Font(Font.MONOSPACED, Font.PLAIN, 11)
-                alignmentX = Component.LEFT_ALIGNMENT
+                alignmentX = LEFT_ALIGNMENT
             }
             panel.add(errorLabel)
             e.printStackTrace()
@@ -837,7 +837,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         val testItem = JBLabel("Total todos processed: ${panel.componentCount}").apply {
             foreground = Color(100, 100, 100)
             font = Font(Font.MONOSPACED, Font.ITALIC, 10)
-            alignmentX = Component.LEFT_ALIGNMENT
+            alignmentX = LEFT_ALIGNMENT
         }
         panel.add(testItem)
         
@@ -850,7 +850,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
     private fun createTodoItemComponent(content: String, status: String): JPanel {
         val itemPanel = JBPanel<JBPanel<*>>(BorderLayout()).apply {
             background = JBColor.background()
-            alignmentX = Component.LEFT_ALIGNMENT
+            alignmentX = LEFT_ALIGNMENT
         }
         
         // Get appropriate icon based on status
@@ -1208,7 +1208,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
             lineWrap = true
             wrapStyleWord = true
             border = null
-            alignmentX = Component.LEFT_ALIGNMENT
+            alignmentX = LEFT_ALIGNMENT
         }
         
         // Create clickable "show more" link
@@ -1216,7 +1216,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
             foreground = Color.decode("#3498db") // 蓝色链接颜色
             this.font = font
             cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-            alignmentX = Component.LEFT_ALIGNMENT
+            alignmentX = LEFT_ALIGNMENT
             
             addMouseListener(object : MouseAdapter() {
                 override fun mouseClicked(e: MouseEvent) {
@@ -1262,7 +1262,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
             lineWrap = true
             wrapStyleWord = true
             border = null
-            alignmentX = Component.LEFT_ALIGNMENT
+            alignmentX = LEFT_ALIGNMENT
         }
         
         // Create clickable "show more" link
@@ -1270,7 +1270,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
             foreground = Color.decode("#3498db") // 蓝色链接颜色
             this.font = font
             cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-            alignmentX = Component.LEFT_ALIGNMENT
+            alignmentX = LEFT_ALIGNMENT
             
             addMouseListener(object : MouseAdapter() {
                 override fun mouseClicked(e: MouseEvent) {
@@ -1316,7 +1316,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                 lineWrap = true
                 wrapStyleWord = true
                 border = null
-                alignmentX = Component.LEFT_ALIGNMENT
+                alignmentX = LEFT_ALIGNMENT
             }
             container.add(textArea)
         }
@@ -1326,7 +1326,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
             foreground = Color.decode("#3498db") // 蓝色链接颜色
             this.font = font
             cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-            alignmentX = Component.LEFT_ALIGNMENT
+            alignmentX = LEFT_ALIGNMENT
             
             addMouseListener(object : MouseAdapter() {
                 override fun mouseClicked(e: MouseEvent) {
@@ -1359,7 +1359,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         container.layout = BoxLayout(container, BoxLayout.Y_AXIS)
         
         val lines = formattedSummary.split("\\n")
-        for ((index, line) in lines.withIndex()) {
+        for ((_, line) in lines.withIndex()) {
             if (line.isNotBlank()) {
                 // Check if this line contains "show more" for bash output
                 if (line.contains("(show more)")) {
@@ -1375,7 +1375,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                         lineWrap = true
                         wrapStyleWord = true
                         border = null
-                        alignmentX = Component.LEFT_ALIGNMENT
+                        alignmentX = LEFT_ALIGNMENT
                     }
                     container.add(textArea)
                 }
@@ -1408,7 +1408,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                 lineWrap = true
                 wrapStyleWord = true
                 border = null
-                alignmentX = Component.LEFT_ALIGNMENT
+                alignmentX = LEFT_ALIGNMENT
             }
             container.add(textArea)
         }

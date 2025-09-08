@@ -42,7 +42,7 @@ class ChatCompletionContributor : CompletionContributor() {
                 slashCommandRegistry = SlashCommandRegistry(project!!)
             }
 
-            val virtualFile = parameters.originalFile.virtualFile
+            parameters.originalFile.virtualFile
             val editor = parameters.editor
             val document = editor.document
             val caretOffset = editor.caretModel.offset
@@ -289,7 +289,7 @@ class ChatCompletionContributor : CompletionContributor() {
             
             // If we don't have enough recent files, add some project files
             if (recentFiles.size < 10) {
-                val projectScope = com.intellij.psi.search.GlobalSearchScope.projectScope(project)
+                com.intellij.psi.search.GlobalSearchScope.projectScope(project)
                 val fileIndex = com.intellij.openapi.roots.ProjectFileIndex.getInstance(project)
                 
                 val allProjectFiles = mutableListOf<com.intellij.openapi.vfs.VirtualFile>()

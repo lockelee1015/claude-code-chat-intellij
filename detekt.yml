@@ -142,6 +142,8 @@ style:
   UnusedImports:
     active: true
     autoCorrect: true
+  CanBeNonNullable:
+    active: true
   EqualsNullCall:
     active: true
   ForbiddenComment:

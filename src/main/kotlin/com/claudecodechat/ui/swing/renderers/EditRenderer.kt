@@ -21,6 +21,8 @@ import com.intellij.openapi.project.ProjectManager
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBPanel
+import com.intellij.ui.components.JBScrollPane
+import com.intellij.ui.components.JBTextArea
 import com.intellij.util.ui.JBUI
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -146,7 +148,7 @@ class EditRenderer : ToolRenderer() {
             // Auto-scroll to first modified line
             if (modifiedLineOffsets.isNotEmpty()) {
                 val firstModifiedOffset = modifiedLineOffsets.first()
-                val lineNumber = editor.document.getLineNumber(firstModifiedOffset)
+                editor.document.getLineNumber(firstModifiedOffset)
                 editor.caretModel.moveToOffset(firstModifiedOffset)
                 editor.scrollingModel.scrollToCaret(ScrollType.CENTER)
             }
@@ -226,7 +228,7 @@ class EditRenderer : ToolRenderer() {
             val textLength = text.length
             
             // Add red background highlighting for entire content
-            val highlighter = markupModel.addRangeHighlighter(
+            markupModel.addRangeHighlighter(
                 0, textLength,
                 HighlighterLayer.SELECTION - 1,
                 createDeletedTextAttributes(),
@@ -246,7 +248,7 @@ class EditRenderer : ToolRenderer() {
             val textLength = text.length
             
             // Add green background highlighting for entire content
-            val highlighter = markupModel.addRangeHighlighter(
+            markupModel.addRangeHighlighter(
                 0, textLength,
                 HighlighterLayer.SELECTION - 1,
                 createAddedTextAttributes(),
@@ -313,7 +315,7 @@ class EditRenderer : ToolRenderer() {
             endOffset,
             HighlighterLayer.SELECTION - 1, // Lower than selection
             textAttributes,
-            com.intellij.openapi.editor.markup.HighlighterTargetArea.EXACT_RANGE
+            HighlighterTargetArea.EXACT_RANGE
         )
     }
     
@@ -500,7 +502,7 @@ class EditRenderer : ToolRenderer() {
         return JBPanel<JBPanel<*>>(BorderLayout()).apply {
             background = JBColor.background()
             
-            val textArea = com.intellij.ui.components.JBTextArea(text).apply {
+            val textArea = JBTextArea(text).apply {
                 isEditable = false
                 font = Font(Font.MONOSPACED, Font.PLAIN, 11)
                 background = JBColor.background()
@@ -508,7 +510,7 @@ class EditRenderer : ToolRenderer() {
                 lineWrap = false
             }
             
-            val scrollPane = com.intellij.ui.components.JBScrollPane(textArea).apply {
+            val scrollPane = JBScrollPane(textArea).apply {
                 preferredSize = Dimension(-1, 150)
                 border = JBUI.Borders.empty()
             }
@@ -517,38 +519,6 @@ class EditRenderer : ToolRenderer() {
             
             // Disable scrolling by default, enable on click
             ScrollControlUtil.disableScrollingByDefault(scrollPane)
-        }
-    }
-    
-    /**
-     * Show full diff in separate window using virtual file
-     */
-    private fun showFullDiff(oldText: String, newText: String, filePath: String) {
-        val project = ProjectManager.getInstance().openProjects.firstOrNull() ?: return
-        
-        try {
-            // Create virtual file with the new content for immediate viewing
-            if (newText.isNotEmpty()) {
-                val fileName = if (filePath.isNotEmpty()) filePath.substringAfterLast("/") else "ModifiedFile.txt"
-                val fileType = getFileType(filePath)
-                val virtualFile = com.intellij.testFramework.LightVirtualFile(fileName, fileType, newText)
-                
-                // Open the modified file in editor
-                com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project).openFile(virtualFile, true)
-            }
-            
-            // Also show diff window for comparison
-            val diffRequest = SimpleDiffRequest(
-                "File Changes: ${filePath.substringAfterLast("/")}",
-                DiffContentFactory.getInstance().create(oldText),
-                DiffContentFactory.getInstance().create(newText),
-                "Before",
-                "After"
-            )
-            
-            DiffManager.getInstance().showDiff(project, diffRequest)
-        } catch (e: Exception) {
-            // Ignore errors in diff display
         }
     }
     

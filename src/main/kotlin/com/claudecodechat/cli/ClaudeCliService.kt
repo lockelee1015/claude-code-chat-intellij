@@ -23,12 +23,12 @@ class ClaudeCliService(private val project: Project) {
     
     private val logger = Logger.getInstance(ClaudeCliService::class.java)
     private val processes = ConcurrentHashMap<String, ClaudeProcess>()
-    private val messageChannel = Channel<ClaudeStreamMessage>(Channel.UNLIMITED)
-    
+
     companion object {
         fun getInstance(project: Project): ClaudeCliService = project.service()
-        
+
         const val DEFAULT_MODEL = "sonnet"
+
         const val DEFAULT_OUTPUT_FORMAT = "stream-json"
         
         // Claude CLI executable name
@@ -84,13 +84,8 @@ class ClaudeCliService(private val project: Project) {
             val processBuilder = ProcessBuilder(command)
             processBuilder.directory(File(projectPath))
             
-            // Set up environment with PATH
+            // Set up environment
             val env = processBuilder.environment()
-            val currentPath = env["PATH"] ?: ""
-            val nodePath = "${System.getProperty("user.home")}/.nvm/versions/node/v22.17.0/bin"
-            if (!currentPath.contains(nodePath)) {
-                env["PATH"] = "$nodePath:$currentPath"
-            }
             
             // Add custom environment variables from settings
             parseEnvironmentVariables(settings.environmentVariables).forEach { (key, value) ->

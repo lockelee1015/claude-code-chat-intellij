@@ -41,7 +41,8 @@ class ChatInputBar(
     private lateinit var inputEditor: Editor
     private lateinit var inputDocument: Document
     private val modelComboBox: JComboBox<String> = JComboBox(arrayOf("auto", "sonnet", "opus", "haiku"))
-    private val sendButton: JButton = JButton().apply {
+    // 智能按钮：发送时显示为停止按钮，停止时显示为发送按钮
+    private val smartButton: JButton = JButton().apply {
         icon = AllIcons.Actions.Execute
         toolTipText = if (System.getProperty("os.name").lowercase().contains("mac")) {
             "Send (Cmd+Enter)"
@@ -53,17 +54,13 @@ class ChatInputBar(
 
     private val currentFileLabel: JLabel = JLabel("")
     
-    // Context status bar
-    private val contextStatusBar: JBPanel<JBPanel<*>> = JBPanel(BorderLayout())
-    private val contextLabel: JLabel = JLabel("Context: Ready")
-    private val contextIcon: JLabel = JLabel(AllIcons.General.Information)
+    // 合并的状态栏：显示 context 和 loading 信息
+    private val statusBar: JBPanel<JBPanel<*>> = JBPanel(BorderLayout())
+    private val statusLabel: JLabel = JLabel("Context: Ready")
+    private val statusIcon: JLabel = JLabel(AllIcons.General.Information)
     
-    // Loading bar components
-    private val loadingPanel: JBPanel<JBPanel<*>> = JBPanel(BorderLayout())
-    private val loadingIcon: JLabel = JLabel(AnimatedIcon.Default.INSTANCE)
-    private val loadingText: JLabel = JLabel("")
-    private val timerLabel: JLabel = JLabel("")
-    private val stopButton: JButton = JButton("Stop")
+    // Loading 状态管理
+    private var isLoading = false
     
     // Plan mode checkbox
     private val planModeCheckBox: JCheckBox = JCheckBox("Plan")
@@ -86,8 +83,8 @@ class ChatInputBar(
         inputDocument = document
 
 
-        // Setup loading panel
-        setupLoadingPanel()
+        // Setup status bar
+        setupStatusBar()
 
         // Layout - Use Editor component
         val inputScroll = JBScrollPane(inputEditor.component).apply {
@@ -118,32 +115,28 @@ class ChatInputBar(
                     toolTipText = "Enable plan mode (--permission-mode plan) - Use Shift+Tab to toggle"
                     foreground = JBColor.foreground()
                     preferredSize = Dimension(50, 28) // 紧凑宽度，匹配其他控件高度
-                    alignmentY = Component.CENTER_ALIGNMENT
+                    alignmentY = CENTER_ALIGNMENT
                 }
                 
-                // 添加顺序：plan checkbox, 模型选择, 发送按钮
+                // 添加顺序：plan checkbox, 模型选择, 智能按钮
                 add(planModeCheckBox)
                 add(modelComboBox)
-                add(sendButton)
+                add(smartButton)
             }
             add(right, BorderLayout.EAST)
         }
 
         val section = JBPanel<JBPanel<*>>(BorderLayout()).apply {
             border = JBUI.Borders.empty()
-            add(loadingPanel, BorderLayout.NORTH)
-            add(contextStatusBar, BorderLayout.CENTER)
+            add(statusBar, BorderLayout.NORTH)
             
             // Create a container for input and controls
             val inputContainer = JBPanel<JBPanel<*>>(BorderLayout()).apply {
                 add(inputScroll, BorderLayout.CENTER)
                 add(controls, BorderLayout.SOUTH)
             }
-            add(inputContainer, BorderLayout.SOUTH)
+            add(inputContainer, BorderLayout.CENTER)
         }
-
-        // Setup context status bar
-        setupContextStatusBar()
         
         val mainPanel = JBPanel<JBPanel<*>>(BorderLayout()).apply {
             add(section, BorderLayout.CENTER)
@@ -153,7 +146,13 @@ class ChatInputBar(
         // Don't add completion panel to layout - it will be a popup
 
         // Actions
-        sendButton.addActionListener { sendMessage() }
+        smartButton.addActionListener { 
+            if (isLoading) {
+                stopMessage()
+            } else {
+                sendMessage()
+            }
+        }
         setupFileInfoTracking()
     }
     
@@ -203,7 +202,7 @@ class ChatInputBar(
                     if (insertedChar == '/' || insertedChar == '@') {
                         lastInsertedChar = insertedChar
                         // Delay the completion trigger to avoid interference
-                        javax.swing.SwingUtilities.invokeLater {
+                        SwingUtilities.invokeLater {
                             ApplicationManager.getApplication().invokeLater {
                                 // Double-check we're still in the right state
                                 if (lastInsertedChar == insertedChar && editor.caretModel.offset == event.offset + 1) {
@@ -312,7 +311,7 @@ class ChatInputBar(
 
     fun requestInputFocus() { inputEditor.contentComponent.requestFocus() }
     fun setText(text: String) {
-        com.intellij.openapi.application.ApplicationManager.getApplication().runWriteAction {
+        ApplicationManager.getApplication().runWriteAction {
             inputDocument.setText(text)
         }
     }
@@ -320,7 +319,7 @@ class ChatInputBar(
     fun getCaretPosition(): Int = inputEditor.caretModel.offset
     fun setCaretPosition(pos: Int) { inputEditor.caretModel.moveToOffset(pos) }
     fun appendText(text: String) {
-        com.intellij.openapi.application.ApplicationManager.getApplication().runWriteAction {
+        ApplicationManager.getApplication().runWriteAction {
             val current = inputDocument.text
             val newText = if (current.isEmpty()) text else "$current\n\n$text"
             inputDocument.setText(newText)
@@ -332,7 +331,9 @@ class ChatInputBar(
      * Update the context information in the status bar
      */
     fun updateContextInfo(context: String) {
-        contextLabel.text = "Context: $context"
+        if (!isLoading) {
+            statusLabel.text = "Context: $context"
+        }
     }
     
     /**
@@ -340,7 +341,7 @@ class ChatInputBar(
      */
     fun updateTokenUsage(inputTokens: Int, outputTokens: Int, cacheReadTokens: Int = 0, cacheCreationTokens: Int = 0, sessionId: String? = null) {
         val contextLength = inputTokens + cacheReadTokens + cacheCreationTokens
-        val totalTokens = contextLength + outputTokens
+        contextLength + outputTokens
         
         // Format tokens with 'k' suffix for thousands, keeping one decimal place
         fun formatTokens(tokens: Int): String {
@@ -370,31 +371,49 @@ class ChatInputBar(
             }
         }
         
-        contextLabel.text = displayText
+        if (!isLoading) {
+            statusLabel.text = displayText
+        }
     }
     
     // Loading state management
     fun showLoading(userPrompt: String) {
+        isLoading = true
         val summary = createPromptSummary(userPrompt)
-        loadingText.text = summary
         
         // Start timer
         startTime = System.currentTimeMillis()
         startTimer()
         
-        loadingPanel.isVisible = true
-        sendButton.isEnabled = false
+        // 更新状态栏显示 loading 信息
+        updateStatusDisplay(summary, true)
+        
+        // 更新按钮为停止状态
+        smartButton.icon = AllIcons.Actions.Suspend
+        smartButton.toolTipText = "Stop"
+        
         revalidate()
         repaint()
     }
     
     fun hideLoading() {
+        isLoading = false
+        
         // Stop timer
         timerJob?.cancel()
         timerJob = null
         
-        loadingPanel.isVisible = false
-        sendButton.isEnabled = true
+        // 恢复状态栏显示
+        updateStatusDisplay("Context: Ready", false)
+        
+        // 恢复按钮为发送状态
+        smartButton.icon = AllIcons.Actions.Execute
+        smartButton.toolTipText = if (System.getProperty("os.name").lowercase().contains("mac")) {
+            "Send (Cmd+Enter)"
+        } else {
+            "Send (Ctrl+Enter)"
+        }
+        
         revalidate()
         repaint()
     }
@@ -408,7 +427,11 @@ class ChatInputBar(
                 val milliseconds = (elapsed % 1000) / 100
                 
                 ApplicationManager.getApplication().invokeLater {
-                    timerLabel.text = "${seconds}.${milliseconds}s"
+                    if (isLoading) {
+                        val currentText = statusLabel.text
+                        val baseText = currentText.substringBefore(" | ")
+                        statusLabel.text = "$baseText | ${seconds}.${milliseconds}s"
+                    }
                 }
                 
                 delay(100) // Update every 100ms
@@ -418,6 +441,22 @@ class ChatInputBar(
     
     private fun createPromptSummary(prompt: String): String {
         return if (prompt.length <= 50) prompt else prompt.take(47) + "..."
+    }
+    
+    /**
+     * 更新状态栏显示
+     */
+    private fun updateStatusDisplay(text: String, isActive: Boolean) {
+        statusLabel.text = text
+        statusIcon.icon = if (isActive) AnimatedIcon.Default.INSTANCE else AllIcons.General.Information
+    }
+    
+    /**
+     * 停止消息处理
+     */
+    private fun stopMessage() {
+        onStop?.invoke()
+        hideLoading()
     }
     
     /**
@@ -441,7 +480,7 @@ class ChatInputBar(
         showLoading(text)
         
         // Clear input in write action
-        com.intellij.openapi.application.ApplicationManager.getApplication().runWriteAction {
+        ApplicationManager.getApplication().runWriteAction {
             inputDocument.setText("")
         }
         onSend(text, model, planModeCheckBox.isSelected)
@@ -474,7 +513,7 @@ class ChatInputBar(
                 val vf = editor.virtualFile
                 if (vf != null) {
                     val fileName = vf.name
-                    val line = editor.caretModel.logicalPosition.line + 1
+                    editor.caretModel.logicalPosition.line + 1
                     
                     // Check if there's a selection
                     val selectionModel = editor.selectionModel
@@ -512,92 +551,33 @@ class ChatInputBar(
         }
     }
     
-    private fun setupContextStatusBar() {
-        // Configure context status bar without background color
-        contextStatusBar.apply {
-            background = JBColor.background() // 使用原生背景色，无特殊背景
+    private fun setupStatusBar() {
+        // Configure status bar
+        statusBar.apply {
+            background = JBColor.background()
             border = JBUI.Borders.empty(4, 8, 4, 8)
             preferredSize = Dimension(Int.MAX_VALUE, 24)
         }
         
-        contextLabel.apply {
+        // Configure status label
+        statusLabel.apply {
             font = Font(Font.SANS_SERIF, Font.PLAIN, 11)
-            foreground = JBColor.foreground() // 使用标准前景色以确保可读性
+            foreground = JBColor.foreground()
         }
         
-        contextIcon.apply {
+        // Configure status icon
+        statusIcon.apply {
             icon = AllIcons.General.Information
             border = JBUI.Borders.empty(0, 0, 0, 6)
         }
         
         val leftPanel = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, 5, 0)).apply {
-            background = JBColor.background() // 使用原生背景色
-            add(contextIcon)
-            add(contextLabel)
+            background = JBColor.background()
+            add(statusIcon)
+            add(statusLabel)
         }
         
-        contextStatusBar.add(leftPanel, BorderLayout.WEST)
-    }
-
-    private fun setupLoadingPanel() {
-        // Configure loading icon with animation
-        loadingIcon.apply {
-            icon = AnimatedIcon.Default.INSTANCE // 动态加载图标
-            border = JBUI.Borders.empty(0, 0, 0, 8)
-        }
-        
-        // Configure loading components
-        loadingText.apply {
-            font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
-            foreground = JBColor.foreground()
-        }
-        
-        // Configure timer label
-        timerLabel.apply {
-            font = Font(Font.SANS_SERIF, Font.PLAIN, 11)
-            foreground = JBColor.GRAY
-            border = JBUI.Borders.empty(0, 8, 0, 0)
-        }
-        
-        // Configure stop button with native styling
-        stopButton.apply {
-            font = Font(Font.SANS_SERIF, Font.PLAIN, 11)
-            preferredSize = Dimension(70, 28)
-            // 使用默认样式，不自定义颜色
-            
-            addActionListener {
-                onStop?.invoke()
-                hideLoading()
-            }
-        }
-        
-        // Layout loading panel with proper height and border
-        loadingPanel.apply {
-            background = JBColor.background() // 使用原生背景色
-            border = JBUI.Borders.compound(
-                JBUI.Borders.customLine(JBColor.border(), 1), // 添加边框
-                JBUI.Borders.empty(8, 12, 8, 12) // 内边距
-            )
-            preferredSize = Dimension(Int.MAX_VALUE, 48) // 增加高度到 48px
-            
-            val leftPanel = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, 5, 6)).apply {
-                background = JBColor.background()
-                add(loadingIcon)
-                add(loadingText)
-                add(timerLabel)
-            }
-            
-            val rightPanel = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.RIGHT, 0, 6)).apply {
-                background = JBColor.background()
-                add(stopButton)
-            }
-            
-            add(leftPanel, BorderLayout.WEST)
-            add(rightPanel, BorderLayout.EAST)
-            
-            // Initially hidden
-            isVisible = false
-        }
+        statusBar.add(leftPanel, BorderLayout.WEST)
     }
     
     /**

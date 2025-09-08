@@ -13,27 +13,16 @@ class SlashCommandRegistry(private val project: Project) {
      */
     fun getBuiltInCommands(): List<CompletionItem.SlashCommand> {
         return listOf(
-            CompletionItem.SlashCommand(
-                name = "help",
-                description = "Get usage help"
-            ),
+            // 这个要自己实现
             CompletionItem.SlashCommand(
                 name = "clear",
                 description = "Clear conversation history"
             ),
             CompletionItem.SlashCommand(
-                name = "cost",
-                description = "Show token usage statistics"
-            ),
-            CompletionItem.SlashCommand(
-                name = "review",
-                description = "Request code review",
-                argumentHint = "[file-or-directory]"
-            ),
-            CompletionItem.SlashCommand(
                 name = "init",
                 description = "Initialize project with CLAUDE.md guide"
             ),
+            // 这个要自己实现
             CompletionItem.SlashCommand(
                 name = "memory",
                 description = "Edit CLAUDE.md memory files"
@@ -43,19 +32,12 @@ class SlashCommandRegistry(private val project: Project) {
                 description = "Compact conversation with optional focus instructions",
                 argumentHint = "[instructions]"
             ),
+            // 这个要测试
             CompletionItem.SlashCommand(
                 name = "add-dir",
                 description = "Add additional working directories",
                 argumentHint = "[directory-path]"
             ),
-            CompletionItem.SlashCommand(
-                name = "agents",
-                description = "Manage custom AI subagents for specialized tasks"
-            ),
-            CompletionItem.SlashCommand(
-                name = "pr_comments",
-                description = "View pull request comments"
-            )
         )
     }
     

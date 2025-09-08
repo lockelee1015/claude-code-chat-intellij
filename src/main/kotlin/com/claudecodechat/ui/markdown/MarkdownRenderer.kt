@@ -235,7 +235,7 @@ object MarkdownRenderer {
         }
     }
 
-    private fun colorToCss(color: java.awt.Color): String {
+    private fun colorToCss(color: Color): String {
         val r = color.red
         val g = color.green
         val b = color.blue

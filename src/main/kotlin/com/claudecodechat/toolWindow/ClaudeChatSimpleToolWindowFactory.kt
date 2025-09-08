@@ -221,7 +221,7 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
     }
 
     private fun addWelcomeContent(project: Project, toolWindow: ToolWindow) {
-        val panel = JPanel(java.awt.BorderLayout()).apply {
+        val panel = JPanel(BorderLayout()).apply {
             background = JBColor.background() // 设置主面板背景色以适应主题
         }
         
@@ -233,11 +233,11 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
         welcomePanel.border = JBUI.Borders.empty(20, 20, 20, 20)
         
         val title = JLabel("Welcome to Claude Chat")
-        title.font = java.awt.Font(java.awt.Font.SANS_SERIF, java.awt.Font.BOLD, 14)
+        title.font = Font(Font.SANS_SERIF, Font.BOLD, 14)
         title.alignmentX = Component.CENTER_ALIGNMENT
         
         val subtitle = JLabel("Start chatting or browse session history using the buttons above")
-        subtitle.font = java.awt.Font(java.awt.Font.SANS_SERIF, java.awt.Font.PLAIN, 12)
+        subtitle.font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
         subtitle.foreground = JBColor.GRAY
         subtitle.alignmentX = Component.CENTER_ALIGNMENT
         
@@ -254,12 +254,12 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
         tipsPanel.alignmentX = Component.CENTER_ALIGNMENT
         
         val tip1 = JLabel("💡 Use slash commands: /help, /clear, /cost, /review, /init")
-        tip1.font = java.awt.Font(java.awt.Font.SANS_SERIF, java.awt.Font.PLAIN, 11)
+        tip1.font = Font(Font.SANS_SERIF, Font.PLAIN, 11)
         tip1.foreground = JBColor.GRAY
         tip1.alignmentX = Component.CENTER_ALIGNMENT
 
         val tip2 = JLabel("💡 Reference files: @filename to include file content in your prompt")
-        tip2.font = java.awt.Font(java.awt.Font.SANS_SERIF, java.awt.Font.PLAIN, 11)
+        tip2.font = Font(Font.SANS_SERIF, Font.PLAIN, 11)
         tip2.foreground = JBColor.GRAY
         tip2.alignmentX = Component.CENTER_ALIGNMENT
 
@@ -288,17 +288,17 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
                 }
             },
             onStop = {
-                com.claudecodechat.state.SessionViewModel.getInstance(project).stopCurrentRequest()
+                SessionViewModel.getInstance(project).stopCurrentRequest()
             }
         )
-        val inputPanel = JPanel(java.awt.BorderLayout()).apply {
+        val inputPanel = JPanel(BorderLayout()).apply {
             background = JBColor.background() // 设置输入面板背景色
-            border = com.intellij.util.ui.JBUI.Borders.empty(0, 10, 0, 10)
-            add(inputBar, java.awt.BorderLayout.CENTER)
+            border = JBUI.Borders.empty(0, 10, 0, 10)
+            add(inputBar, BorderLayout.CENTER)
         }
 
-        panel.add(welcomePanel, java.awt.BorderLayout.CENTER)
-        panel.add(inputPanel, java.awt.BorderLayout.SOUTH)
+        panel.add(welcomePanel, BorderLayout.CENTER)
+        panel.add(inputPanel, BorderLayout.SOUTH)
 
         welcomeContent = ContentFactory.getInstance().createContent(panel, "Home", false)
         welcomeContent.isCloseable = true
@@ -367,8 +367,8 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
             .createPopup()
             
         // Handle selection
-        list.addMouseListener(object : java.awt.event.MouseAdapter() {
-            override fun mouseClicked(e: java.awt.event.MouseEvent) {
+        list.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) {
                 if (e.clickCount == 2) {
                     val selectedSession = list.selectedValue
                     if (selectedSession != null) {
@@ -395,7 +395,7 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
         
         // Position popup to not exceed window bounds
         val toolWindowComponent = toolWindow.component
-        val toolWindowBounds = toolWindowComponent.bounds
+        toolWindowComponent.bounds
         val screenBounds = toolWindowComponent.graphicsConfiguration.bounds
         
         // Calculate popup position
@@ -469,7 +469,7 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
             val countLabel = JLabel("${session.messageCount}").apply {
                 font = Font(Font.SANS_SERIF, Font.PLAIN, 11)
                 foreground = if (isSelected) list?.selectionForeground ?: JBColor.WHITE else JBColor.GRAY
-                horizontalAlignment = SwingConstants.RIGHT
+                horizontalAlignment = RIGHT
                 preferredSize = Dimension(30, preferredSize.height)
             }
             
