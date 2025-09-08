@@ -334,9 +334,24 @@ class ClaudeCliService(private val project: Project) {
     }
     
     private fun findClaudeBinary(): String {
-        // Try to find Claude binary in PATH
-        val pathDirs = System.getenv("PATH")?.split(File.pathSeparator) ?: emptyList()
+        // First try to use 'which' command to find claude
+        try {
+            val process = ProcessBuilder("which", CLAUDE_BINARY).start()
+            val exitCode = process.waitFor()
+            
+            if (exitCode == 0) {
+                val path = process.inputStream.bufferedReader().readText().trim()
+                if (path.isNotEmpty()) {
+                    logger.info("Found Claude binary using 'which': $path")
+                    return path
+                }
+            }
+        } catch (e: Exception) {
+            logger.debug("'which' command failed, trying alternative methods: ${e.message}")
+        }
         
+        // Fallback: try to find in PATH manually
+        val pathDirs = System.getenv("PATH")?.split(File.pathSeparator) ?: emptyList()
         logger.info("Searching for Claude binary in PATH: $pathDirs")
         
         for (dir in pathDirs) {
@@ -347,24 +362,7 @@ class ClaudeCliService(private val project: Project) {
             }
         }
         
-        // Try common installation locations including nvm
-        val commonPaths = listOf(
-            "/usr/local/bin/claude",
-            "/usr/bin/claude",
-            "${System.getProperty("user.home")}/.local/bin/claude",
-            "${System.getProperty("user.home")}/bin/claude",
-            "${System.getProperty("user.home")}/.nvm/versions/node/v22.17.0/bin/claude"
-        )
-        
-        for (path in commonPaths) {
-            val claudeFile = File(path)
-            if (claudeFile.exists() && claudeFile.canExecute()) {
-                logger.info("Found Claude binary at: ${claudeFile.absolutePath}")
-                return claudeFile.absolutePath
-            }
-        }
-        
-        logger.warn("Claude binary not found in common locations, using fallback")
+        logger.warn("Claude binary not found, using fallback")
         // Fallback to just the binary name and hope it's in PATH
         return CLAUDE_BINARY
     }
