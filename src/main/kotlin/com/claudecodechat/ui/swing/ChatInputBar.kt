@@ -138,7 +138,7 @@ class ChatInputBar(
                 // Configure plan mode checkbox - compact and aligned
                 planModeCheckBox.apply {
                     font = Font(Font.SANS_SERIF, Font.PLAIN, 11)
-                    toolTipText = "Enable plan mode (--permission-mode plan) - Use Shift+Tab to toggle"
+                    toolTipText = "Plan mode (Claude Code --permission-mode plan). Toggle with Shift+Tab."
                     foreground = JBColor.foreground()
                     preferredSize = Dimension(50, 28) // 紧凑宽度，匹配其他控件高度
                     alignmentY = CENTER_ALIGNMENT
@@ -663,6 +663,10 @@ class ChatInputBar(
         if (text.isEmpty()) return
         val model = (modelComboBox.selectedItem as? String) ?: "auto"
         
+        // Build IDE context XML and prepend to prompt if available
+        val ideContext = buildIdeContextXml()
+        val finalText = if (ideContext != null) "$ideContext\n\n$text" else text
+        
         // Show loading state
         showLoading(text)
         
@@ -670,8 +674,41 @@ class ChatInputBar(
         ApplicationManager.getApplication().runWriteAction {
             inputDocument.setText("")
         }
-        onSend(text, model, planModeCheckBox.isSelected)
+        onSend(finalText, model, planModeCheckBox.isSelected)
     }
+
+    private fun buildIdeContextXml(): String? {
+        return try {
+            val fem = FileEditorManager.getInstance(project)
+            val editor = fem.selectedTextEditor ?: return null
+            val vf = editor.virtualFile ?: return null
+            val base = project.basePath
+            val path = try {
+                if (base != null) {
+                    val rel = java.nio.file.Paths.get(base).relativize(java.nio.file.Paths.get(vf.path)).toString()
+                    xmlEscape(rel)
+                } else xmlEscape(vf.path)
+            } catch (_: Exception) {
+                xmlEscape(vf.path)
+            }
+            val caretLine = editor.caretModel.logicalPosition.line + 1
+            val sel = editor.selectionModel
+            val selAttr = if (sel.hasSelection()) {
+                val startLine = editor.offsetToLogicalPosition(sel.selectionStart).line + 1
+                val endLine = editor.offsetToLogicalPosition(sel.selectionEnd).line + 1
+                " selection_start=\"$startLine\" selection_end=\"$endLine\""
+            } else ""
+            "<ide_context><file path=\"$path\" caret_line=\"$caretLine\"$selAttr/></ide_context>"
+        } catch (_: Exception) {
+            null
+        }
+    }
+    
+    private fun xmlEscape(s: String): String = s
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
 
 
 

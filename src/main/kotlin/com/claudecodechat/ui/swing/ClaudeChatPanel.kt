@@ -33,6 +33,12 @@ import java.awt.FlowLayout
 import com.claudecodechat.ui.markdown.MarkdownRenderer
 import com.claudecodechat.ui.markdown.MarkdownRenderConfig
 import java.io.File
+import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.psi.search.FilenameIndex
+import com.intellij.psi.search.GlobalSearchScope
+import com.intellij.openapi.fileEditor.OpenFileDescriptor
+import com.intellij.ui.ColorUtil
 
 class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>() {
     private val sessionViewModel = SessionViewModel.getInstance(project)
@@ -502,8 +508,190 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
             add(iconPanel, BorderLayout.WEST)
             
             // Content area (right side) - flexible width with text wrapping
-            val contentArea = createWrappingContentArea(content, textColor)
-            add(contentArea, BorderLayout.CENTER)
+            val right = JBPanel<JBPanel<*>>().apply {
+                layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                background = getMessageAreaBackgroundColor()
+                border = JBUI.Borders.empty()
+            }
+
+            val (ctx, stripped) = extractIdeContext(content)
+            val contentArea = createWrappingContentArea(stripped, textColor)
+            right.add(contentArea)
+            if (ctx != null) {
+                right.add(createContextSeparator())
+                right.add(buildContextChip(ctx))
+            }
+            add(right, BorderLayout.CENTER)
+        }
+    }
+
+    private fun createContextSeparator(): JComponent {
+        val container = JBPanel<JBPanel<*>>(BorderLayout()).apply {
+            background = getMessageAreaBackgroundColor()
+            border = JBUI.Borders.empty(6, 0, 6, 0)
+        }
+        val lineColorBase = JBColor.namedColor("Link.foreground", JBColor(0x4A88FF, 0x8AA7FF))
+        val lineColor = if (JBColor.isBright()) ColorUtil.withAlpha(lineColorBase, 0.30) else ColorUtil.withAlpha(lineColorBase, 0.25)
+        val line = JPanel().apply {
+            background = lineColor
+            preferredSize = Dimension(Int.MAX_VALUE, 1)
+            minimumSize = Dimension(1, 1)
+            maximumSize = Dimension(Int.MAX_VALUE, 1)
+            isOpaque = true
+        }
+        container.add(line, BorderLayout.CENTER)
+        return container
+    }
+
+    private data class IdeContext(val path: String, val caretLine: Int?, val selStart: Int?, val selEnd: Int?)
+
+    private fun extractIdeContext(content: String): Pair<IdeContext?, String> {
+        // 简单解析：匹配首个 <ide_context><file .../></ide_context>
+        val regex = Regex(
+            """(?s)^\n*<ide_context>\s*<file([^>]*)/>\s*</ide_context>\n*""",
+            RegexOption.IGNORE_CASE
+        )
+        val match = regex.find(content)
+        if (match != null) {
+            val attrs = match.groupValues.getOrNull(1) ?: ""
+            fun attr(name: String): String? {
+                val m = Regex("""$name="([^"]*)"""", RegexOption.IGNORE_CASE).find(attrs)
+                return m?.groupValues?.getOrNull(1)
+            }
+            val ctx = IdeContext(
+                path = attr("path") ?: "",
+                caretLine = attr("caret_line")?.toIntOrNull(),
+                selStart = attr("selection_start")?.toIntOrNull(),
+                selEnd = attr("selection_end")?.toIntOrNull()
+            )
+            val stripped = content.removeRange(match.range)
+            return ctx to stripped.trimStart('\n')
+        }
+        return null to content
+    }
+
+    private fun buildContextChip(ctx: IdeContext): JComponent {
+        val panel = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, 6, 0)).apply {
+            background = getMessageAreaBackgroundColor()
+            alignmentX = LEFT_ALIGNMENT
+        }
+        val icon = JBLabel(AllIcons.FileTypes.Any_type).apply {
+            foreground = secondaryTextColor()
+        }
+        val pathText = shortenPath(ctx.path)
+        val info = buildString {
+            append(pathText)
+            when {
+                ctx.selStart != null && ctx.selEnd != null -> append("  [${ctx.selStart}-${ctx.selEnd}]")
+                ctx.caretLine != null -> append("  :${ctx.caretLine}")
+            }
+        }
+        val label = JBLabel(info).apply {
+            foreground = secondaryTextColor()
+            font = Font(Font.MONOSPACED, Font.PLAIN, 11)
+        }
+        panel.add(icon)
+        panel.add(label)
+
+        // Clickable: open file at caret/selection
+        val open: () -> Unit = {
+            openContextInEditor(ctx)
+        }
+        val ml = object : java.awt.event.MouseAdapter() {
+            override fun mouseClicked(e: java.awt.event.MouseEvent) { open() }
+            override fun mouseEntered(e: java.awt.event.MouseEvent) { panel.cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) }
+            override fun mouseExited(e: java.awt.event.MouseEvent) { panel.cursor = Cursor.getDefaultCursor() }
+        }
+        panel.addMouseListener(ml)
+        label.addMouseListener(ml)
+        icon.addMouseListener(ml)
+
+        // Tooltip with full path and range info
+        val tooltip = buildString {
+            append(ctx.path)
+            when {
+                ctx.selStart != null && ctx.selEnd != null -> append("\nSelection: ${ctx.selStart}-${ctx.selEnd}")
+                ctx.caretLine != null -> append("\nLine: ${ctx.caretLine}")
+            }
+            append("\nClick to open")
+        }
+        panel.toolTipText = tooltip
+        label.toolTipText = tooltip
+        icon.toolTipText = tooltip
+        return panel
+    }
+
+    private fun shortenPath(path: String, max: Int = 80): String {
+        if (path.length <= max) return path
+        val parts = path.split('/', '\\')
+        if (parts.size <= 2) return path.take(max)
+        val first = parts.first()
+        val last = parts.last()
+        return "$first/.../$last"
+    }
+
+    private fun openContextInEditor(ctx: IdeContext) {
+        val candidates = resolveFiles(ctx.path)
+        if (candidates.isEmpty()) return
+        if (candidates.size == 1) {
+            openVfAt(candidates.first(), ctx)
+            return
+        }
+        // Multiple candidates -> chooser
+        val base = project.basePath
+        val items = candidates.map { vf ->
+            if (base != null) java.nio.file.Paths.get(base).relativize(java.nio.file.Paths.get(vf.path)).toString() else vf.path
+        }
+        JBPopupFactory.getInstance()
+            .createPopupChooserBuilder(items)
+            .setTitle("Open file")
+            .setItemChosenCallback { selected ->
+                val idx = items.indexOf(selected)
+                if (idx >= 0) openVfAt(candidates[idx], ctx)
+            }
+            .createPopup()
+            .showInCenterOf(this)
+    }
+
+    private fun resolveFiles(path: String): List<VirtualFile> {
+        // If contains separator, try local resolution (relative to project)
+        if (path.contains('/') || path.contains('\\')) {
+            val base = project.basePath
+            // Absolute
+            if (java.io.File(path).isAbsolute) {
+                LocalFileSystem.getInstance().findFileByPath(path)?.let { return listOf(it) }
+            }
+            // Relative to project
+            if (base != null) {
+                LocalFileSystem.getInstance().findFileByIoFile(java.io.File(base, path))?.let { return listOf(it) }
+            }
+            // Fall back to filename search
+            val name = path.substringAfterLast('/').substringAfterLast('\\')
+            val scope = GlobalSearchScope.projectScope(project)
+            return FilenameIndex.getVirtualFilesByName(name, scope).toList()
+        }
+        // Plain file name -> index search
+        val scope = GlobalSearchScope.projectScope(project)
+        return FilenameIndex.getVirtualFilesByName(path, scope).toList()
+    }
+
+    private fun openVfAt(vf: VirtualFile, ctx: IdeContext) {
+        val fem = com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project)
+        val line = (ctx.caretLine ?: ctx.selStart ?: 1).coerceAtLeast(1) - 1
+        val editor = fem.openTextEditor(OpenFileDescriptor(project, vf, line, 0), true)
+        if (editor != null) {
+            val doc = editor.document
+            if (ctx.selStart != null && ctx.selEnd != null) {
+                val startLine = (ctx.selStart - 1).coerceIn(0, doc.lineCount - 1)
+                val endLine = (ctx.selEnd - 1).coerceIn(0, doc.lineCount - 1)
+                val startOffset = doc.getLineStartOffset(startLine)
+                val endOffset = doc.getLineEndOffset(endLine)
+                editor.caretModel.moveToOffset(startOffset)
+                editor.selectionModel.setSelection(startOffset, endOffset)
+                editor.scrollingModel.scrollToCaret(com.intellij.openapi.editor.ScrollType.CENTER)
+            } else if (ctx.caretLine != null) {
+                editor.scrollingModel.scrollToCaret(com.intellij.openapi.editor.ScrollType.CENTER)
+            }
         }
     }
 
