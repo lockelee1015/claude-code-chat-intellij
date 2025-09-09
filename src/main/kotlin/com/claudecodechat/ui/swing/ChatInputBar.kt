@@ -78,6 +78,7 @@ class ChatInputBar(
     private val statusBar: JBPanel<JBPanel<*>> = JBPanel(BorderLayout())
     private val statusLabel: JLabel = JLabel("Context: Ready")
     private val statusIcon: JLabel = JLabel(AllIcons.General.Information)
+    private val sessionIdLabel: JLabel = JLabel("")
     
     // Loading 状态管理
     private var isLoading = false
@@ -536,31 +537,20 @@ class ChatInputBar(
         }
         
         val displayText = if (contextLength > 0 || outputTokens > 0) {
-            val tokenInfo = if (cacheReadTokens > 0 || cacheCreationTokens > 0) {
+            if (cacheReadTokens > 0 || cacheCreationTokens > 0) {
                 "Context: ${formatTokens(contextLength)} (${formatTokens(inputTokens)}↑ + ${formatTokens(cacheReadTokens)} cache read + ${formatTokens(cacheCreationTokens)} cache creation) | Output: ${formatTokens(outputTokens)}↓"
             } else {
                 "Context: ${formatTokens(contextLength)} (${formatTokens(inputTokens)}↑) | Output: ${formatTokens(outputTokens)}↓"
             }
-            
-            // Add session ID in debug mode
-            if (com.claudecodechat.settings.ClaudeSettings.getInstance().debugMode && sessionId != null) {
-                "$tokenInfo | Session: ${sessionId.take(8)}"
-            } else {
-                tokenInfo
-            }
         } else {
-            val baseText = "Context: Ready"
-            // Add session ID in debug mode even when no tokens
-            if (com.claudecodechat.settings.ClaudeSettings.getInstance().debugMode && sessionId != null) {
-                "$baseText | Session: ${sessionId.take(8)}"
-            } else {
-                baseText
-            }
+            "Context: Ready"
         }
         
         if (!isLoading) {
             statusLabel.text = displayText
         }
+        // Keep session id label updated regardless of loading state
+        updateSessionId(sessionId)
     }
     
     // Loading state management
@@ -663,9 +653,9 @@ class ChatInputBar(
         if (text.isEmpty()) return
         val model = (modelComboBox.selectedItem as? String) ?: "auto"
         
-        // Build IDE context XML and prepend to prompt if available
+        // Build IDE context XML and append after main content if available
         val ideContext = buildIdeContextXml()
-        val finalText = if (ideContext != null) "$ideContext\n\n$text" else text
+        val finalText = if (ideContext != null) "$text\n\n$ideContext" else text
         
         // Show loading state
         showLoading(text)
@@ -698,7 +688,14 @@ class ChatInputBar(
                 val endLine = editor.offsetToLogicalPosition(sel.selectionEnd).line + 1
                 " selection_start=\"$startLine\" selection_end=\"$endLine\""
             } else ""
-            "<ide_context><file path=\"$path\" caret_line=\"$caretLine\"$selAttr/></ide_context>"
+            // Add a human-readable note attribute to ide_context so the model knows this is IDE context
+            val notePlain = if (sel.hasSelection()) {
+                "IDE context: user is in IntelliJ; focus file '$path'; selection lines ${selAttr.substringAfter("selection_start=\"").substringBefore("\"")} - ${selAttr.substringAfter("selection_end=\"").substringBefore("\"")}"
+            } else {
+                "IDE context: user is in IntelliJ; focus file '$path'; caret at line $caretLine"
+            }
+            val note = xmlEscape(notePlain)
+            "<ide_context note=\"$note\"><file path=\"$path\" caret_line=\"$caretLine\"$selAttr/></ide_context>"
         } catch (_: Exception) {
             null
         }
@@ -800,8 +797,34 @@ class ChatInputBar(
             add(statusIcon)
             add(statusLabel)
         }
-        
+        // Right panel for fixed session id display
+        val rightPanel = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.RIGHT, 5, 0)).apply {
+            background = JBColor.background()
+            sessionIdLabel.apply {
+                font = Font(Font.SANS_SERIF, Font.PLAIN, 11)
+                foreground = JBColor.foreground()
+                toolTipText = null
+            }
+            add(sessionIdLabel)
+        }
+
         statusBar.add(leftPanel, BorderLayout.WEST)
+        statusBar.add(rightPanel, BorderLayout.EAST)
+    }
+
+    /**
+     * Update the fixed session id label on the right.
+     * Always shown when available, including during loading.
+     */
+    fun updateSessionId(sessionId: String?) {
+        if (sessionId.isNullOrBlank()) {
+            sessionIdLabel.text = ""
+            sessionIdLabel.toolTipText = null
+        } else {
+            val shortId = sessionId.take(8)
+            sessionIdLabel.text = "Session: $shortId"
+            sessionIdLabel.toolTipText = sessionId
+        }
     }
     
     /**

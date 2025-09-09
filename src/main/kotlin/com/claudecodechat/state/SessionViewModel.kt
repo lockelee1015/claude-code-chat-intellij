@@ -33,6 +33,8 @@ class SessionViewModel(private val project: Project) : Disposable {
     private var followMode = true
     // Track if user has manually selected a session (to prevent auto-resume conflicts)
     private var userHasSelectedSession = false
+    // Current logical session id (groups multiple CLI sessions)
+    private var currentLogicalId: String? = null
     
     init {
         // Set up file watcher for real-time updates
@@ -48,20 +50,10 @@ class SessionViewModel(private val project: Project) : Disposable {
                 
                 // Only auto-resume if user hasn't manually selected a session
                 if (!userHasSelectedSession) {
-                    val projectPath = project.basePath
-                    if (projectPath != null) {
-                        val recentSessions = sessionHistoryLoader.getRecentSessionsWithDetails(projectPath, 1)
-                        if (recentSessions.isNotEmpty()) {
-                            val mostRecent = recentSessions.first()
-                            logger.info("Auto-resuming most recent session: ${mostRecent.id}")
-                            resumeSession(mostRecent.id)
-                        } else {
-                            // Fall back to persisted session ID
-                            sessionPersistence.getLastSessionId()?.let { sessionId ->
-                                logger.info("Auto-resuming persisted session: $sessionId")
-                                resumeSession(sessionId)
-                            }
-                        }
+                    val lid = sessionPersistence.getLastLogicalSessionId()
+                    if (lid != null) {
+                        logger.info("Auto-resuming most recent logical session: $lid")
+                        resumeLogicalSession(lid)
                     }
                 }
             } catch (e: Exception) {
@@ -253,8 +245,14 @@ class SessionViewModel(private val project: Project) : Disposable {
                 model = _currentSession.value?.model ?: "sonnet"
             )
             _currentSession.value = sessionInfo
-            // Persist the session ID
-            sessionPersistence.setLastSessionId(message.sessionId)
+            // Record mapping to logical session
+            if (currentLogicalId == null) {
+                currentLogicalId = sessionPersistence.createLogicalSession()
+            }
+            currentLogicalId?.let { lid ->
+                sessionPersistence.appendCliSession(lid, message.sessionId)
+                sessionPersistence.setLastLogicalSessionId(lid)
+            }
             return // Don't add system init messages to UI
         }
         
@@ -285,6 +283,14 @@ class SessionViewModel(private val project: Project) : Disposable {
             return
         }
         
+        // If an error occurs, stop loading and surface the error message
+        if (message.type == MessageType.ERROR) {
+            logger.warn("Received ERROR message: ${message.error?.message ?: message}")
+            _isLoading.value = false
+            addMessage(message) // still show the error in the transcript
+            return
+        }
+
         // Filter out system messages and pure result messages
         if (message.type == MessageType.SYSTEM) {
             return
@@ -302,6 +308,19 @@ class SessionViewModel(private val project: Project) : Disposable {
         
         // Add all other messages (USER, ASSISTANT, tool calls/results within ASSISTANT messages)
         addMessage(message)
+
+        // Update logical session summary info for history list
+        if (currentLogicalId == null) {
+            currentLogicalId = sessionPersistence.createLogicalSession()
+        }
+        currentLogicalId?.let { lid ->
+            if (message.type == MessageType.USER) {
+                val firstText = message.message?.content?.firstOrNull { it.type == com.claudecodechat.models.ContentType.TEXT }?.text
+                sessionPersistence.updatePreviewAndCount(lid, firstText, incrementCountBy = 1)
+            } else if (message.type == MessageType.ASSISTANT) {
+                sessionPersistence.updatePreviewAndCount(lid, null, incrementCountBy = 1)
+            }
+        }
         
         // Update metrics based on message content
         message.message?.let { msg ->
@@ -410,11 +429,12 @@ class SessionViewModel(private val project: Project) : Disposable {
         _sessionMetrics.value = SessionMetrics()
         _queuedPrompts.value = emptyList()
         _isLoading.value = false
-        sessionPersistence.setLastSessionId(null)
+        // Create a new logical session and point to it
+        currentLogicalId = sessionPersistence.createLogicalSession()
         
         // Session started - no need to show system message in UI
     }
-    
+
     /**
      * Resume an existing session
      */
@@ -449,11 +469,12 @@ class SessionViewModel(private val project: Project) : Disposable {
                 _messages.value = historicalMessages
                 
                 // Update session info
-                _currentSession.value = SessionInfo(
-                    sessionId = sessionId,
-                    projectId = null
-                )
-                sessionPersistence.setLastSessionId(sessionId)
+                _currentSession.value = SessionInfo(sessionId = sessionId, projectId = null)
+                // Ensure we have a logical session and append this CLI id
+                if (currentLogicalId == null) {
+                    currentLogicalId = sessionPersistence.createLogicalSession()
+                }
+                currentLogicalId?.let { lid -> sessionPersistence.appendCliSession(lid, sessionId) }
                 
                 // Update metrics based on loaded messages
                 if (historicalMessages.isNotEmpty()) {
@@ -473,6 +494,49 @@ class SessionViewModel(private val project: Project) : Disposable {
             name = "Resume-Session-Thread"
             start()
         }
+    }
+
+    /**
+     * Resume a logical session by concatenating all CLI sessions in its chain
+     */
+    fun resumeLogicalSession(logicalId: String) {
+        userHasSelectedSession = true
+        Thread {
+            _isLoading.value = true
+            try {
+                logger.info("Resuming logical session: $logicalId")
+                val projectPath = project.basePath ?: return@Thread
+                val ls = sessionPersistence.getLogicalSession(logicalId)
+                if (ls == null) {
+                    logger.warn("Logical session not found: $logicalId")
+                    currentLogicalId = logicalId
+                    _messages.value = emptyList()
+                    _currentSession.value = null
+                    return@Thread
+                }
+                val all = mutableListOf<ClaudeStreamMessage>()
+                ls.cliSessionIds.forEach { sid ->
+                    try {
+                        all += sessionHistoryLoader.loadSession(projectPath, sid)
+                    } catch (e: Exception) {
+                        logger.warn("Failed to load chain session $sid", e)
+                    }
+                }
+                _messages.value = emptyList()
+                _messages.value = all
+                if (ls.cliSessionIds.isNotEmpty()) {
+                    _currentSession.value = SessionInfo(sessionId = ls.cliSessionIds.last(), projectId = null)
+                }
+                currentLogicalId = logicalId
+                if (all.isNotEmpty()) updateMetricsFromMessages(all)
+                updateMetrics { it.copy(wasResumed = true) }
+            } catch (e: Exception) {
+                logger.error("Failed to resume logical session: $logicalId", e)
+                errorList.add("Failed to resume session: ${e.message}")
+            } finally {
+                _isLoading.value = false
+            }
+        }.apply { name = "Resume-Logical-Session-Thread"; start() }
     }
     
     /**
@@ -549,40 +613,20 @@ class SessionViewModel(private val project: Project) : Disposable {
      * Get recent session IDs for quick resume
      */
     fun getRecentSessionIds(): List<String> {
-        // First try to get from persistence
-        val persistedIds = sessionPersistence.getRecentSessionIds()
-        if (persistedIds.isNotEmpty()) return persistedIds
-        
-        // Otherwise scan the file system
-        return try {
-            val projectPath = project.basePath ?: return emptyList()
-            val sessions = sessionHistoryLoader.getRecentSessionsWithDetails(projectPath)
-            sessions.map { it.id }
-        } catch (e: Exception) {
-            logger.warn("Failed to load recent sessions from filesystem", e)
-            emptyList()
-        }
+        return sessionPersistence.getLogicalSessions().map { it.id }
     }
     
     /**
      * Get recent sessions with details for UI display
      */
     fun getRecentSessionsWithDetails(): List<SessionDetails> {
-        val projectPath = project.basePath ?: return emptyList()
-        
-        return try {
-            val sessions = sessionHistoryLoader.getRecentSessionsWithDetails(projectPath)
-            sessions.map { session ->
-                SessionDetails(
-                    id = session.id,
-                    preview = session.preview ?: "No messages",
-                    timestamp = formatTimestamp(session.lastModified),
-                    messageCount = session.messageCount
-                )
-            }
-        } catch (e: Exception) {
-            logger.warn("Failed to load session details", e)
-            emptyList()
+        return sessionPersistence.getLogicalSessions().map { ls ->
+            SessionDetails(
+                id = ls.id,
+                preview = if (ls.preview.isNotBlank()) ls.preview else "No messages",
+                timestamp = formatTimestamp(ls.lastModified),
+                messageCount = ls.messageCount
+            )
         }
     }
     

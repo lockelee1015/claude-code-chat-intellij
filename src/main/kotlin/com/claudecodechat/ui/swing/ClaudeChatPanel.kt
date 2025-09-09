@@ -225,6 +225,13 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                 )
             }
         }
+
+        // Keep session id label updated immediately when session changes (even during loading)
+        scope.launch {
+            sessionViewModel.currentSession.collect { cs ->
+                chatInputBar.updateSessionId(cs?.sessionId)
+            }
+        }
         
         // ToolWindow manages tabs now; no need to reflect current session in local tabs
         
@@ -572,7 +579,8 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
     private fun createContextSeparator(): JComponent {
         val container = JBPanel<JBPanel<*>>(BorderLayout()).apply {
             background = getMessageAreaBackgroundColor()
-            border = JBUI.Borders.empty(6, 0, 6, 0)
+            // Add ~2ch left indent for visual alignment with context chip
+            border = JBUI.Borders.empty(6, JBUI.scale(16), 6, 0)
         }
         val lineColorBase = JBColor.namedColor("Link.foreground", JBColor(0x4A88FF, 0x8AA7FF))
         val lineColor = if (JBColor.isBright()) ColorUtil.withAlpha(lineColorBase, 0.30) else ColorUtil.withAlpha(lineColorBase, 0.25)
@@ -587,26 +595,31 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         return container
     }
 
-    private data class IdeContext(val path: String, val caretLine: Int?, val selStart: Int?, val selEnd: Int?)
+    private data class IdeContext(val path: String, val caretLine: Int?, val selStart: Int?, val selEnd: Int?, val note: String?)
 
     private fun extractIdeContext(content: String): Pair<IdeContext?, String> {
         // 简单解析：匹配首个 <ide_context><file .../></ide_context>
-        val regex = Regex(
-            """(?s)^\n*<ide_context>\s*<file([^>]*)/>\s*</ide_context>\n*""",
-            RegexOption.IGNORE_CASE
-        )
-        val match = regex.find(content)
+        // Allow attributes on <ide_context ...>; support block at start or at end of content
+        val headRegex = Regex("""(?s)^\n*<ide_context([^>]*)>\s*<file([^>]*)/>\s*</ide_context>\n*""", RegexOption.IGNORE_CASE)
+        val tailRegex = Regex("""(?s)\n*<ide_context([^>]*)>\s*<file([^>]*)/>\s*</ide_context>\n*$""", RegexOption.IGNORE_CASE)
+        val match = headRegex.find(content) ?: tailRegex.find(content)
         if (match != null) {
-            val attrs = match.groupValues.getOrNull(1) ?: ""
+            val ideAttrs = match.groupValues.getOrNull(1) ?: ""
+            val fileAttrs = match.groupValues.getOrNull(2) ?: ""
             fun attr(name: String): String? {
-                val m = Regex("""$name="([^"]*)"""", RegexOption.IGNORE_CASE).find(attrs)
+                val m = Regex("""$name="([^"]*)"""", RegexOption.IGNORE_CASE).find(fileAttrs)
+                return m?.groupValues?.getOrNull(1)
+            }
+            fun ideAttr(name: String): String? {
+                val m = Regex("""$name="([^"]*)"""", RegexOption.IGNORE_CASE).find(ideAttrs)
                 return m?.groupValues?.getOrNull(1)
             }
             val ctx = IdeContext(
                 path = attr("path") ?: "",
                 caretLine = attr("caret_line")?.toIntOrNull(),
                 selStart = attr("selection_start")?.toIntOrNull(),
-                selEnd = attr("selection_end")?.toIntOrNull()
+                selEnd = attr("selection_end")?.toIntOrNull(),
+                note = ideAttr("note")
             )
             val stripped = content.removeRange(match.range)
             return ctx to stripped.trimStart('\n')
@@ -636,6 +649,14 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         }
         panel.add(icon)
         panel.add(label)
+        // Add ~2ch left indent to the chip block
+        try {
+            val fm = label.getFontMetrics(label.font)
+            val ch = fm.charWidth('m')
+            panel.border = JBUI.Borders.empty(0, ch * 2, 0, 0)
+        } catch (_: Exception) {
+            panel.border = JBUI.Borders.empty(0, JBUI.scale(16), 0, 0)
+        }
 
         // Clickable: open file at caret/selection
         val open: () -> Unit = {
@@ -656,6 +677,10 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
             when {
                 ctx.selStart != null && ctx.selEnd != null -> append("\nSelection: ${ctx.selStart}-${ctx.selEnd}")
                 ctx.caretLine != null -> append("\nLine: ${ctx.caretLine}")
+            }
+            if (!ctx.note.isNullOrBlank()) {
+                append("\n")
+                append(ctx.note)
             }
             append("\nClick to open")
         }

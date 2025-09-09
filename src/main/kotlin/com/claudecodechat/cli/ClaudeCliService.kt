@@ -297,10 +297,12 @@ class ClaudeCliService(private val project: Project) {
         // Session management
         when {
             options.sessionId != null -> {
-                // 如果有 sessionId，总是使用 --resume 来恢复该 session
-                logger.info("Using --resume with sessionId: ${options.sessionId}")
+                // 仅使用 --resume <id>（当前 CLI 不允许与 --session-id 同时使用）
+                val sid = options.sessionId
+                logger.info("Using --resume with sessionId: $sid")
                 args.add("--resume")
-                args.add(options.sessionId)
+                // 显式传入会话 ID，避免交互选择
+                args.add(sid)
             }
             options.continueSession -> {
                 // 如果没有 sessionId 但要继续会话，使用 -c 继续最近的 session

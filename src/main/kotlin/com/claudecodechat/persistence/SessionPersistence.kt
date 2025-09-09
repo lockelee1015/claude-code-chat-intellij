@@ -19,16 +19,29 @@ class SessionPersistence : PersistentStateComponent<SessionPersistence.State> {
     }
     
     data class State(
+        // Deprecated: last CLI session id (kept for backward compatibility)
         var lastSessionId: String? = null,
         var recentSessionIds: MutableList<String> = mutableListOf(),
         var autoResumeLastSession: Boolean = true,
-        var openTabs: MutableList<TabInfo> = mutableListOf()
+        var openTabs: MutableList<TabInfo> = mutableListOf(),
+        // New: logical sessions that group multiple CLI session IDs
+        var logicalSessions: MutableList<LogicalSession> = mutableListOf(),
+        var lastLogicalSessionId: String? = null
     )
     
     data class TabInfo(
         var sessionId: String? = null,
         var title: String = "",
         var isActive: Boolean = false
+    )
+
+    data class LogicalSession(
+        var id: String = java.util.UUID.randomUUID().toString(),
+        var cliSessionIds: MutableList<String> = mutableListOf(),
+        var title: String = "",
+        var preview: String = "",
+        var lastModified: Long = System.currentTimeMillis(),
+        var messageCount: Int = 0
     )
     
     private var myState = State()
@@ -85,4 +98,47 @@ class SessionPersistence : PersistentStateComponent<SessionPersistence.State> {
     fun setActiveTab(sessionId: String?) {
         myState.openTabs.forEach { it.isActive = (it.sessionId == sessionId) }
     }
+
+    // --- Logical sessions API ---
+    fun createLogicalSession(initialTitle: String = ""): String {
+        val ls = LogicalSession()
+        ls.title = initialTitle
+        myState.logicalSessions.add(0, ls)
+        myState.lastLogicalSessionId = ls.id
+        return ls.id
+    }
+
+    fun getLastLogicalSessionId(): String? = myState.lastLogicalSessionId
+
+    fun setLastLogicalSessionId(id: String?) {
+        myState.lastLogicalSessionId = id
+    }
+
+    fun appendCliSession(logicalId: String, cliId: String) {
+        val ls = myState.logicalSessions.find { it.id == logicalId } ?: return
+        if (!ls.cliSessionIds.contains(cliId)) {
+            ls.cliSessionIds.add(cliId)
+        }
+        ls.lastModified = System.currentTimeMillis()
+        // maintain MRU ordering: move to front
+        myState.logicalSessions.removeIf { it.id == logicalId }
+        myState.logicalSessions.add(0, ls)
+        myState.lastLogicalSessionId = logicalId
+    }
+
+    fun updatePreviewAndCount(logicalId: String, newPreviewIfEmpty: String?, incrementCountBy: Int = 0) {
+        val ls = myState.logicalSessions.find { it.id == logicalId } ?: return
+        if (ls.preview.isBlank() && !newPreviewIfEmpty.isNullOrBlank()) {
+            ls.preview = newPreviewIfEmpty
+        }
+        if (incrementCountBy != 0) ls.messageCount = (ls.messageCount + incrementCountBy).coerceAtLeast(0)
+        ls.lastModified = System.currentTimeMillis()
+    }
+
+    fun getLogicalSessions(limit: Int? = null): List<LogicalSession> {
+        val list = myState.logicalSessions.toList()
+        return if (limit != null) list.take(limit) else list
+    }
+
+    fun getLogicalSession(logicalId: String): LogicalSession? = myState.logicalSessions.find { it.id == logicalId }
 }

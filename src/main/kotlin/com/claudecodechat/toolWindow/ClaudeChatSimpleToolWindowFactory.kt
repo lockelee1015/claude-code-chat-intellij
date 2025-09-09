@@ -170,7 +170,17 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
     }
 
     private fun extractFirstUserMessageText(message: ClaudeStreamMessage): String {
-        return message.message?.content?.firstOrNull()?.text ?: ""
+        val raw = message.message?.content?.firstOrNull()?.text ?: return ""
+        return stripIdeContext(raw).trim()
+    }
+
+    private fun stripIdeContext(text: String): String {
+        // Remove a leading or trailing <ide_context ...><file .../></ide_context> block
+        val regex = Regex(
+            """(?s)^\n*<ide_context[^>]*>\s*<file[^>]*/>\s*</ide_context>\n*|\n*<ide_context[^>]*>\s*<file[^>]*/>\s*</ide_context>\n*$""",
+            RegexOption.IGNORE_CASE
+        )
+        return text.replace(regex, "").trim()
     }
 
     private fun createTitleSummary(text: String, maxWords: Int = 3): String {
@@ -211,9 +221,9 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
         }
         content.putUserData(MESSAGE_OBSERVER_KEY, messageObserver)
 
-        // If a session was chosen, resume it
+        // If a session was chosen, resume logical session
         if (sessionId != null) {
-            SessionViewModel.getInstance(project).resumeSession(sessionId)
+            SessionViewModel.getInstance(project).resumeLogicalSession(sessionId)
         } else {
             SessionViewModel.getInstance(project).startNewSession()
         }
@@ -320,21 +330,9 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
         println("DEBUG: showHistoryPopup called")
         val basePath = project.basePath
         println("DEBUG: basePath = $basePath")
-        val sessions = if (basePath != null) {
-            try {
-                val sessionList = SessionHistoryLoader().getRecentSessionsWithDetails(basePath, 15)
-                    .sortedByDescending { it.lastModified }
-                println("DEBUG: Found ${sessionList.size} sessions")
-                sessionList
-            } catch (e: Exception) {
-                println("DEBUG: Exception loading sessions: ${e.message}")
-                emptyList()
-            }
-        } else {
-            emptyList()
-        }
+        val sessionList = SessionViewModel.getInstance(project).getRecentSessionsWithDetails()
         
-        if (sessions.isEmpty()) {
+        if (sessionList.isEmpty()) {
             println("DEBUG: No sessions found, showing empty message")
             val popup = JBPopupFactory.getInstance()
                 .createMessage("No session history available")
@@ -343,17 +341,40 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
         }
 
         // Create custom list with detailed layout
-        val listModel = DefaultListModel<SessionHistoryLoader.SessionInfo>()
-        sessions.forEach { listModel.addElement(it) }
-        
+        data class LogicalSessionItem(val id: String, val preview: String, val lastModified: Long, val messageCount: Int)
+        val listModel = DefaultListModel<LogicalSessionItem>()
+        sessionList.forEach { d -> listModel.addElement(LogicalSessionItem(d.id, d.preview, System.currentTimeMillis(), d.messageCount)) }
+
         val list = JList(listModel).apply {
-            cellRenderer = SessionHistoryRenderer()
+            cellRenderer = object : DefaultListCellRenderer() {
+                override fun getListCellRendererComponent(list: JList<*>?, value: Any?, index: Int, isSelected: Boolean, cellHasFocus: Boolean): Component {
+                    val item = value as? LogicalSessionItem
+                    if (item == null) return super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
+                    val panel = JPanel(BorderLayout()).apply {
+                        border = JBUI.Borders.empty(8, 12, 8, 12)
+                        background = if (isSelected) list?.selectionBackground ?: JBColor.BLUE else list?.background ?: JBColor.WHITE
+                    }
+                    val summary = JLabel(if (item.preview.length > 35) item.preview.take(35) + "..." else item.preview).apply {
+                        font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
+                        foreground = if (isSelected) list?.selectionForeground ?: JBColor.WHITE else list?.foreground ?: JBColor.BLACK
+                    }
+                    val right = JLabel(item.messageCount.toString()).apply {
+                        font = Font(Font.SANS_SERIF, Font.PLAIN, 11)
+                        foreground = if (isSelected) list?.selectionForeground ?: JBColor.WHITE else JBColor.GRAY
+                        horizontalAlignment = RIGHT
+                        preferredSize = Dimension(30, preferredSize.height)
+                    }
+                    panel.add(summary, BorderLayout.CENTER)
+                    panel.add(right, BorderLayout.EAST)
+                    return panel
+                }
+            }
             selectionMode = ListSelectionModel.SINGLE_SELECTION
-            visibleRowCount = Math.min(sessions.size, 8) // Max 8 visible rows
+            visibleRowCount = Math.min(sessionList.size, 8) // Max 8 visible rows
         }
         
         val scrollPane = JScrollPane(list).apply {
-            preferredSize = Dimension(500, Math.min(sessions.size * 60 + 10, 480))
+            preferredSize = Dimension(500, Math.min(sessionList.size * 60 + 10, 480))
             verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
             horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
         }
@@ -370,10 +391,10 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
         list.addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent) {
                 if (e.clickCount == 2) {
-                    val selectedSession = list.selectedValue
+                    val selectedSession = list.selectedValue as? LogicalSessionItem
                     if (selectedSession != null) {
                         popup.closeOk(null)
-                        val title = extractTitleFromSession(selectedSession)
+                        val title = selectedSession.preview.ifBlank { selectedSession.id.take(8) }
                         addChatContent(project, toolWindow, title, selectedSession.id)
                     }
                 }
@@ -383,10 +404,10 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
         list.addKeyListener(object : java.awt.event.KeyAdapter() {
             override fun keyPressed(e: java.awt.event.KeyEvent) {
                 if (e.keyCode == java.awt.event.KeyEvent.VK_ENTER) {
-                    val selectedSession = list.selectedValue
+                    val selectedSession = list.selectedValue as? LogicalSessionItem
                     if (selectedSession != null) {
                         popup.closeOk(null)
-                        val title = extractTitleFromSession(selectedSession)
+                        val title = selectedSession.preview.ifBlank { selectedSession.id.take(8) }
                         addChatContent(project, toolWindow, title, selectedSession.id)
                     }
                 }
@@ -400,7 +421,7 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
         
         // Calculate popup position
         val popupWidth = 500
-        val popupHeight = Math.min(sessions.size * 60 + 50, 500)
+        val popupHeight = Math.min(sessionList.size * 60 + 50, 500)
         
         val anchorLocation = anchor.locationOnScreen
         var x = anchorLocation.x
@@ -418,83 +439,6 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
         
         println("DEBUG: Showing popup underneath anchor")
         popup.showUnderneathOf(anchor)
-    }
-    
-    private fun extractTitleFromSession(session: SessionHistoryLoader.SessionInfo): String {
-        val preview = session.preview?.replace('\n', ' ')?.trim()
-        return when {
-            !preview.isNullOrBlank() -> {
-                // Take first few words as title
-                preview.split(" ").take(3).joinToString(" ")
-            }
-            else -> session.id.take(8)
-        }
-    }
-    
-    // Custom cell renderer for session history
-    private class SessionHistoryRenderer : DefaultListCellRenderer() {
-        override fun getListCellRendererComponent(
-            list: JList<*>?,
-            value: Any?,
-            index: Int,
-            isSelected: Boolean,
-            cellHasFocus: Boolean
-        ): Component {
-            val session = value as? SessionHistoryLoader.SessionInfo
-            if (session == null) {
-                return super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
-            }
-            
-            val panel = JPanel(BorderLayout()).apply {
-                border = JBUI.Borders.empty(8, 12, 8, 12)
-                background = if (isSelected) list?.selectionBackground ?: JBColor.BLUE else list?.background ?: JBColor.WHITE
-            }
-            
-            // Left: Time
-            val timeStr = formatTime(session.lastModified)
-            val timeLabel = JLabel(timeStr).apply {
-                font = Font(Font.SANS_SERIF, Font.PLAIN, 11)
-                foreground = if (isSelected) list?.selectionForeground ?: JBColor.WHITE else JBColor.GRAY
-                preferredSize = Dimension(80, preferredSize.height)
-            }
-            
-            // Center: Summary
-            val preview = session.preview?.replace('\n', ' ')?.trim() ?: "Empty session"
-            val summaryLabel = JLabel(if (preview.length > 35) preview.take(35) + "..." else preview).apply {
-                font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
-                foreground = if (isSelected) list?.selectionForeground ?: JBColor.WHITE else list?.foreground ?: JBColor.BLACK
-            }
-            
-            // Right: Message count
-            val countLabel = JLabel("${session.messageCount}").apply {
-                font = Font(Font.SANS_SERIF, Font.PLAIN, 11)
-                foreground = if (isSelected) list?.selectionForeground ?: JBColor.WHITE else JBColor.GRAY
-                horizontalAlignment = RIGHT
-                preferredSize = Dimension(30, preferredSize.height)
-            }
-            
-            panel.add(timeLabel, BorderLayout.WEST)
-            panel.add(summaryLabel, BorderLayout.CENTER)
-            panel.add(countLabel, BorderLayout.EAST)
-            
-            return panel
-        }
-        
-        private fun formatTime(timestamp: Long): String {
-            val now = System.currentTimeMillis()
-            val diff = now - timestamp
-            
-            return when {
-                diff < 60 * 1000 -> "刚刚"
-                diff < 60 * 60 * 1000 -> "${diff / (60 * 1000)}分钟前"
-                diff < 24 * 60 * 60 * 1000 -> "${diff / (60 * 60 * 1000)}小时前"
-                diff < 7 * 24 * 60 * 60 * 1000 -> "${diff / (24 * 60 * 60 * 1000)}天前"
-                else -> {
-                    val date = java.text.SimpleDateFormat("MM-dd").format(java.util.Date(timestamp))
-                    date
-                }
-            }
-        }
     }
     
     private fun saveTabState(project: Project, toolWindow: ToolWindow) {

@@ -132,9 +132,10 @@ object CodeBlockRenderer {
         // 设置编辑器组件大小和背景
         val component = editor.component
         // 设置代码块的背景色，与 CSS 中的代码块背景一致
+        // 在浅色模式轻微加深，在深色模式进一步加深（避免过亮）
         component.background = JBColor(
-            java.awt.Color(0, 0, 0, (255 * 0.05).toInt()),  // 浅色模式：5% 黑色透明度
-            java.awt.Color(255, 255, 255, (255 * 0.1).toInt())  // 深色模式：10% 白色透明度
+            java.awt.Color(0, 0, 0, (255 * 0.05).toInt()),   // Light: 5% black overlay
+            java.awt.Color(0, 0, 0, (255 * 0.18).toInt())    // Dark: 18% black overlay
         )
         
         // 计算内容的实际高度，让编辑器完全展开显示
@@ -204,8 +205,8 @@ object CodeBlockRenderer {
                 font = swingFont  // 使用与编辑器一致的字体
                 // 设置与编辑器相同的代码块背景色
                 background = JBColor(
-                    java.awt.Color(0, 0, 0, (255 * 0.05).toInt()),  // 浅色模式：5% 黑色透明度
-                    java.awt.Color(255, 255, 255, (255 * 0.1).toInt())  // 深色模式：10% 白色透明度
+                    java.awt.Color(0, 0, 0, (255 * 0.05).toInt()),   // Light
+                    java.awt.Color(0, 0, 0, (255 * 0.18).toInt())     // Dark
                 )
                 foreground = JBColor.foreground()
                 border = JBUI.Borders.empty(12, 8)  // 增加内边距

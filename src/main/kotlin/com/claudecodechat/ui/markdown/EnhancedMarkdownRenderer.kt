@@ -280,6 +280,11 @@ object EnhancedMarkdownRenderer {
         val htmlBody = renderer.render(document)
         val colorForeground = colorToCss(config.overrideForeground ?: JBColor.foreground())
         val colorBackground = "transparent"
+        // Theme-aware colors for code backgrounds and borders
+        val isBright = JBColor.isBright()
+        val preBg = if (isBright) "rgb(240,240,240)" else "rgb(44,45,48)"   // darker in dark theme
+        val inlineBg = if (isBright) "rgb(230,230,230)" else "rgb(54,56,60)"
+        val tableBorder = if (isBright) "rgb(200,200,200)" else "rgb(70,70,70)"
         
         // 使用字体管理器获取与编辑器一致的字体设置
         val settings = ClaudeSettings.getInstance()
@@ -316,15 +321,17 @@ object EnhancedMarkdownRenderer {
               /* 代码块样式 */
               pre { 
                 ${FontManager.createCodeCssFontStyle(scaledCodeFont)}
-                background-color: rgb(240,240,240); 
+                background-color: $preBg; 
                 padding: 6px 8px; 
                 margin: 4px 0; 
+                /* keep simple CSS for JEditorPane compatibility */
               }
               /* 内联代码样式 - 与正文大小协调 */
               code { 
                 ${FontManager.createInlineCodeCssFontStyle(scaledInlineCodeFont)}
-                background-color: rgb(230,230,230); 
+                background-color: $inlineBg; 
                 padding: 1px 3px; 
+                /* keep simple CSS for JEditorPane compatibility */
               }
               /* 代码块内的 code 元素不显示背景色，避免双重背景 */
               pre code { 
@@ -337,7 +344,7 @@ object EnhancedMarkdownRenderer {
                 width: 100%; 
                 border-collapse: collapse;
               }
-              th, td { border: 1px solid rgb(200,200,200); padding: 4px 6px; }
+              th, td { border: 1px solid $tableBorder; padding: 4px 6px; }
               a { 
                 color: #6aa9ff; 
                 text-decoration: none; 
