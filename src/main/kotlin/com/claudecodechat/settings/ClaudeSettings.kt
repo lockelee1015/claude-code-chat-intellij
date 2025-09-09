@@ -21,6 +21,7 @@ class ClaudeSettings : PersistentStateComponent<ClaudeSettings> {
     var maxCodeBlockHeight: Int = 300  // Maximum height for code blocks in pixels
     var syncWithEditorFont: Boolean = false  // Sync markdown fonts with editor fonts
     var markdownLineSpacing: Float = 1.4f  // Line spacing multiplier for markdown content
+    var chatInputSplitterProportion: Float = 0.80f  // Splitter proportion for messages vs input
     
     companion object {
         fun getInstance(): ClaudeSettings {

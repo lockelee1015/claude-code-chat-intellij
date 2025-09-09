@@ -6,6 +6,7 @@ import com.claudecodechat.models.ClaudeStreamMessage
 import com.claudecodechat.models.MessageType
 import com.claudecodechat.settings.ClaudeSettings
 import com.claudecodechat.state.SessionViewModel
+import com.claudecodechat.settings.ChatUiProjectSettings
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
@@ -20,6 +21,7 @@ import com.intellij.ui.awt.RelativePoint
 import com.intellij.util.ui.JBUI
 import com.intellij.ui.JBIntSpinner
 import com.intellij.ui.scale.JBUIScale
+import com.intellij.ui.OnePixelSplitter
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
 import kotlinx.serialization.json.*
@@ -51,6 +53,8 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
     
     
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var splitterSaveJob: Job? = null
+    private var pendingSplitterProp: Float? = null
     
     init {
         layout = BorderLayout()
@@ -143,9 +147,49 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
             add(chatScrollPane, BorderLayout.CENTER)
         }
         
-        // Main layout - no toolbar needed
-        add(centerSection, BorderLayout.CENTER)
-        add(inputSection, BorderLayout.SOUTH)
+        // Resizable layout: messages on top, input at bottom, with draggable divider
+        inputSection.minimumSize = Dimension(100, 80)
+        val uiProjectState = ChatUiProjectSettings.getInstance(project)
+        val savedProp = uiProjectState.chatInputSplitterProportion
+        val initialProp = if (savedProp in 0.10f..0.95f) savedProp else 0.75f
+        val splitter = OnePixelSplitter(true, initialProp).apply {
+            setFirstComponent(centerSection)
+            setSecondComponent(inputSection)
+            dividerWidth = JBUI.scale(6)
+            background = JBColor.background()
+        }
+        // Persist proportion on change
+        splitter.addPropertyChangeListener("proportion") { evt ->
+            val v = evt.newValue
+            val p = when (v) {
+                is Float -> v
+                is Double -> v.toFloat()
+                is Number -> v.toFloat()
+                else -> null
+            }
+            if (p != null) {
+                val clamped = p.coerceIn(0.10f, 0.95f)
+                pendingSplitterProp = clamped
+                splitterSaveJob?.cancel()
+                splitterSaveJob = scope.launch {
+                    delay(400)
+                    pendingSplitterProp?.let { finalP ->
+                        uiProjectState.chatInputSplitterProportion = finalP
+                    }
+                }
+            }
+        }
+        add(splitter, BorderLayout.CENTER)
+
+        // If there is no saved proportion, set initial so input shows ~3 lines
+        if (savedProp !in 0.10f..0.95f) {
+            javax.swing.SwingUtilities.invokeLater {
+                val total = splitter.height.takeIf { it > 0 } ?: return@invokeLater
+                val desiredInputPx = kotlin.math.max(chatInputBar.preferredSize.height, JBUI.scale(96)) // ~3 lines
+                val prop = (1f - desiredInputPx / total.toFloat()).coerceIn(0.50f, 0.90f)
+                splitter.proportion = prop
+            }
+        }
     }
     
     private fun setupEventHandlers() {
