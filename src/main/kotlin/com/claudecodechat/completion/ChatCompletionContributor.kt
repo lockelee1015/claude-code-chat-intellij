@@ -1,6 +1,7 @@
 package com.claudecodechat.completion
 
 import com.intellij.codeInsight.completion.*
+import com.intellij.codeInsight.completion.impl.CamelHumpMatcher
 import com.intellij.codeInsight.lookup.LookupElementBuilder
 import com.intellij.openapi.project.Project
 import com.intellij.patterns.PlatformPatterns
@@ -68,7 +69,13 @@ class ChatCompletionContributor : CompletionContributor() {
                     addFileCompletions(result, trigger.substring(1))
                 }
                 !hasInvalidTrigger -> {
-                    // 只有在没有无效触发字符的情况下才显示一般提示
+                    // 智能文件提示：无触发符时，基于当前词进行文件名匹配（长度>=3）
+                    val wordInfo = currentWordAt(document.text, caretOffset)
+                    if (wordInfo != null && wordInfo.second.length >= 3) {
+                        addNaturalFileCompletions(result, wordInfo.first, caretOffset, wordInfo.second)
+                    }
+
+                    // 另外提供触发提示
                     result.addElement(
                         LookupElementBuilder.create("/")
                             .withPresentableText("/")
@@ -85,6 +92,59 @@ class ChatCompletionContributor : CompletionContributor() {
                 else -> {
                     // 如果用户输入了无效的触发字符，不显示任何补全
                 }
+            }
+        }
+
+        // 返回 Pair(startOffset, word)；仅字母数字、下划线、点、斜杠、连字符视作词
+        private fun currentWordAt(text: String, caretOffset: Int): Pair<Int, String>? {
+            if (caretOffset <= 0 || caretOffset > text.length) return null
+            var start = caretOffset - 1
+            while (start >= 0) {
+                val ch = text[start]
+                if (ch.isLetterOrDigit() || ch == '_' || ch == '.' || ch == '-' || ch == '/') {
+                    start--
+                } else break
+            }
+            start += 1
+            var end = caretOffset
+            while (end < text.length) {
+                val ch = text[end]
+                if (ch.isLetterOrDigit() || ch == '_' || ch == '.' || ch == '-' || ch == '/') {
+                    end++
+                } else break
+            }
+            if (end <= start) return null
+            return start to text.substring(start, end)
+        }
+
+        private fun addNaturalFileCompletions(result: CompletionResultSet, wordStart: Int, caretOffset: Int, query: String) {
+            val currentProject = project ?: return
+            // 使用 CamelHumpMatcher 高亮与过滤（忽略大小写）
+            val rs = result.withPrefixMatcher(CamelHumpMatcher(query, false))
+            val matches = searchProjectFiles(currentProject, query)
+            matches.take(10).forEach { vf ->
+                val projectBasePath = currentProject.basePath ?: return@forEach
+                val relativePath = try {
+                    val projectPath = java.io.File(projectBasePath).toPath()
+                    val filePath = java.io.File(vf.path).toPath()
+                    projectPath.relativize(filePath).toString()
+                } catch (e: Exception) {
+                    vf.name
+                }
+            val lookup = LookupElementBuilder.create("@${vf.name}")
+                    .withPresentableText("@${vf.name}")
+                    .withTailText(" $relativePath")
+                    .withIcon(vf.fileType.icon)
+                    .withLookupString(vf.name)
+                    .withLookupString(relativePath)
+                    .withInsertHandler { context, _ ->
+                        val editor = context.editor
+                        val document = editor.document
+                        // 将当前词替换为 @relativePath + 空格
+                        document.replaceString(wordStart, caretOffset, "@$relativePath ")
+                        editor.caretModel.moveToOffset(wordStart + relativePath.length + 2)
+                    }
+                rs.addElement(lookup)
             }
         }
         
@@ -127,18 +187,20 @@ class ChatCompletionContributor : CompletionContributor() {
         
         private fun addFileCompletions(result: CompletionResultSet, query: String) {
             val currentProject = project ?: return
-            
+            // 使用 CamelHumpMatcher（忽略大小写）以获得正确高亮与过滤
+            val rs = result.withPrefixMatcher(CamelHumpMatcher(query, false))
+
             // Get recent files for empty query
             if (query.isEmpty()) {
                 val recentFiles = getRecentProjectFiles(currentProject)
                 recentFiles.take(10).forEach { virtualFile -> // Limit to 10 recent files
-                    addFileCompletion(result, virtualFile, currentProject)
+                    addFileCompletion(rs, virtualFile, currentProject)
                 }
             } else {
                 // Search files using IntelliJ's file search
                 val searchResults = searchProjectFiles(currentProject, query)
                 searchResults.take(20).forEach { virtualFile -> // Limit to 20 search results
-                    addFileCompletion(result, virtualFile, currentProject)
+                    addFileCompletion(rs, virtualFile, currentProject)
                 }
             }
         }
@@ -153,10 +215,14 @@ class ChatCompletionContributor : CompletionContributor() {
                 virtualFile.name
             }
             
-            val lookup = LookupElementBuilder.create(relativePath)
+            val lookup = LookupElementBuilder.create("@${virtualFile.name}")
                 .withPresentableText("@${virtualFile.name}")
                 .withTailText(" $relativePath")
                 .withIcon(virtualFile.fileType.icon)
+                // 提供多个 lookupString 以改进大小写与任意位置匹配
+                .withLookupString(virtualFile.name)
+                .withLookupString(virtualFile.name.lowercase())
+                .withLookupString(relativePath)
                 .withInsertHandler { context, item ->
                     val editor = context.editor
                     val document = editor.document
@@ -200,13 +266,12 @@ class ChatCompletionContributor : CompletionContributor() {
                         }
                     }
                     '@' -> {
-                        if (pos == 0 || text[pos - 1].isWhitespace()) {
-                            val query = text.substring(pos + 1, offset)
-                            val spaceIndex = query.indexOf(' ')
-                            val cleanQuery = if (spaceIndex >= 0) query.substring(0, spaceIndex) else query
-                            foundTrigger = Triple(CompletionTrigger.AT, pos, cleanQuery)
-                            break
-                        }
+                        // 放宽触发条件：允许 @ 出现在任何位置
+                        val query = text.substring(pos + 1, offset)
+                        val spaceIndex = query.indexOf(' ')
+                        val cleanQuery = if (spaceIndex >= 0) query.substring(0, spaceIndex) else query
+                        foundTrigger = Triple(CompletionTrigger.AT, pos, cleanQuery)
+                        break
                     }
                     '\n' -> {
                         // Stop at line breaks
@@ -256,13 +321,8 @@ class ChatCompletionContributor : CompletionContributor() {
                         }
                     }
                     '@' -> {
-                        // 如果找到 @ 但不是有效位置（不在开头或空白后），则认为是无效触发
-                        if (pos != 0 && !text[pos - 1].isWhitespace()) {
-                            return true
-                        } else {
-                            // 找到了有效的 @，停止搜索
-                            return false
-                        }
+                        // 放宽：@ 在任何位置都视为有效触发
+                        return false
                     }
                     '\n' -> {
                         // 遇到换行符，停止搜索
@@ -289,29 +349,20 @@ class ChatCompletionContributor : CompletionContributor() {
             
             // If we don't have enough recent files, add some project files
             if (recentFiles.size < 10) {
-                com.intellij.psi.search.GlobalSearchScope.projectScope(project)
                 val fileIndex = com.intellij.openapi.roots.ProjectFileIndex.getInstance(project)
-                
+                val roots = com.intellij.openapi.roots.ProjectRootManager.getInstance(project).contentRoots
                 val allProjectFiles = mutableListOf<com.intellij.openapi.vfs.VirtualFile>()
-                val projectDir = project.projectFile?.parent ?: project.workspaceFile?.parent ?: return recentFiles
-                com.intellij.openapi.vfs.VfsUtil.iterateChildrenRecursively(
-                    projectDir,
-                    { virtualFile -> 
-                        !virtualFile.name.startsWith(".") && 
-                        (virtualFile.isDirectory || fileIndex.isInContent(virtualFile))
+                roots.forEach { root ->
+                    com.intellij.openapi.vfs.VfsUtilCore.iterateChildrenRecursively(
+                        root,
+                        { vf -> !vf.name.startsWith(".") && (vf.isDirectory || fileIndex.isInContent(vf)) }
+                    ) { vf ->
+                        if (!vf.isDirectory && vf.isValid) allProjectFiles.add(vf)
+                        true
                     }
-                ) { virtualFile ->
-                    if (!virtualFile.isDirectory && virtualFile.isValid) {
-                        allProjectFiles.add(virtualFile)
-                    }
-                    true
                 }
-                
-                // Add some common project files
-                allProjectFiles.take(10).forEach { file ->
-                    if (!recentFiles.contains(file)) {
-                        recentFiles.add(file)
-                    }
+                allProjectFiles.asSequence().distinct().take(10).forEach { file ->
+                    if (!recentFiles.contains(file)) recentFiles.add(file)
                 }
             }
             
@@ -319,48 +370,67 @@ class ChatCompletionContributor : CompletionContributor() {
         }
         
         private fun searchProjectFiles(project: Project, query: String): List<com.intellij.openapi.vfs.VirtualFile> {
-            val results = mutableListOf<com.intellij.openapi.vfs.VirtualFile>()
-            
-            // Use IntelliJ's FilenameIndex for fast file searching
+            val results = LinkedHashMap<String, com.intellij.openapi.vfs.VirtualFile>() // keep order + dedupe by path
+
+            fun rank(name: String, path: String): Int {
+                val q = query.lowercase()
+                val n = name.lowercase()
+                val p = path.lowercase()
+                return when {
+                    n.startsWith(q) -> 1000
+                    n.contains(q) -> 800
+                    p.contains(q) -> 600
+                    isSubsequenceIgnoreCase(query, name) -> 400
+                    else -> 0
+                }
+            }
+
+            data class Cand(val vf: com.intellij.openapi.vfs.VirtualFile, val score: Int)
+
+            // 1) Fast name index scan
             val fileNames = com.intellij.psi.search.FilenameIndex.getAllFilenames(project)
             val projectScope = com.intellij.psi.search.GlobalSearchScope.projectScope(project)
-            
-            // Search for files by name
-            fileNames.filter { fileName ->
-                fileName.contains(query, ignoreCase = true)
-            }.forEach { fileName ->
-                val files = com.intellij.psi.search.FilenameIndex.getVirtualFilesByName(fileName, projectScope)
-                files.forEach { virtualFile ->
-                    if (virtualFile.isValid && !virtualFile.isDirectory) {
-                        results.add(virtualFile)
+            fileNames.forEach { fileName ->
+                val score = rank(fileName, fileName)
+                if (score > 0) {
+                    com.intellij.psi.search.FilenameIndex.getVirtualFilesByName(fileName, projectScope).forEach { vf ->
+                        if (vf.isValid && !vf.isDirectory) results.putIfAbsent(vf.path, vf)
                     }
                 }
             }
-            
-            // Also search in file paths for more comprehensive results
-            if (results.size < 10) {
+
+            // 2) Content roots traversal for completeness and path matches
+            if (results.size < 40) {
                 val fileIndex = com.intellij.openapi.roots.ProjectFileIndex.getInstance(project)
-                val projectDir = project.projectFile?.parent ?: project.workspaceFile?.parent ?: return results
-                com.intellij.openapi.vfs.VfsUtil.iterateChildrenRecursively(
-                    projectDir,
-                    { virtualFile -> 
-                        !virtualFile.name.startsWith(".") && 
-                        (virtualFile.isDirectory || fileIndex.isInContent(virtualFile))
-                    }
-                ) { virtualFile ->
-                    if (!virtualFile.isDirectory && virtualFile.isValid) {
-                        val path = virtualFile.path
-                        if ((virtualFile.name.contains(query, ignoreCase = true) || 
-                             path.contains(query, ignoreCase = true)) &&
-                            !results.contains(virtualFile)) {
-                            results.add(virtualFile)
+                val roots = com.intellij.openapi.roots.ProjectRootManager.getInstance(project).contentRoots
+                val cands = mutableListOf<Cand>()
+                roots.forEach { root ->
+                    com.intellij.openapi.vfs.VfsUtilCore.iterateChildrenRecursively(
+                        root,
+                        { vf -> !vf.name.startsWith(".") && (vf.isDirectory || fileIndex.isInContent(vf)) }
+                    ) { vf ->
+                        if (!vf.isDirectory && vf.isValid) {
+                            val sc = rank(vf.name, vf.path)
+                            if (sc > 0 && !results.containsKey(vf.path)) cands.add(Cand(vf, sc))
                         }
+                        results.size + cands.size < 80
                     }
-                    results.size < 20 // Stop when we have enough results
                 }
+                cands.sortedByDescending { it.score }.take(40 - results.size).forEach { results[it.vf.path] = it.vf }
             }
-            
-            return results.sortedBy { it.name }
+
+            return results.values.toList()
+        }
+
+        private fun isSubsequenceIgnoreCase(needle: String, hay: String): Boolean {
+            if (needle.isEmpty()) return true
+            var i = 0
+            val n = needle.lowercase()
+            val h = hay.lowercase()
+            for (c in h) {
+                if (i < n.length && c == n[i]) i++
+            }
+            return i == n.length
         }
         
         private fun getFileIcon(fileType: String?): javax.swing.Icon? {
