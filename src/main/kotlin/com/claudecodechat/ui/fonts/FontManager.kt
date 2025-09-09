@@ -101,7 +101,6 @@ object FontManager {
         return """
             font-family: ${safeFontFamily}, monospace;
             font-size: ${fontInfo.fontSize}px;
-            line-height: ${lineHeightValue};
         """.trimIndent()
     }
     
@@ -117,7 +116,6 @@ object FontManager {
         return """
             font-family: ${safeFontFamily}, sans-serif;
             font-size: ${fontInfo.fontSize}px;
-            line-height: ${lineHeightValue};
         """.trimIndent()
     }
     
@@ -133,7 +131,6 @@ object FontManager {
         return """
             font-family: ${safeFontFamily}, monospace;
             font-size: ${fontInfo.fontSize}px;
-            line-height: ${lineHeightValue};
         """.trimIndent()
     }
     
@@ -149,7 +146,6 @@ object FontManager {
         return """
             font-family: ${safeFontFamily}, monospace;
             font-size: ${fontInfo.fontSize}px;
-            line-height: ${lineHeightValue};
         """.trimIndent()
     }
     

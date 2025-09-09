@@ -316,51 +316,33 @@ object EnhancedMarkdownRenderer {
               /* 代码块样式 */
               pre { 
                 ${FontManager.createCodeCssFontStyle(scaledCodeFont)}
-                background-color: rgba(0,0,0,0.05); 
+                background-color: rgb(240,240,240); 
                 padding: 6px 8px; 
-                white-space: pre-wrap; 
-                margin: 0.25em 0; 
-                border-radius: 4px;
+                margin: 4px 0; 
               }
               /* 内联代码样式 - 与正文大小协调 */
               code { 
                 ${FontManager.createInlineCodeCssFontStyle(scaledInlineCodeFont)}
-                background-color: rgba(0,0,0,0.06); 
+                background-color: rgb(230,230,230); 
                 padding: 1px 3px; 
-                border-radius: 2px;
               }
               /* 代码块内的 code 元素不显示背景色，避免双重背景 */
               pre code { 
-                background-color: transparent !important; 
-                padding: 0 !important; 
-                border-radius: 0 !important;
+                background-color: transparent; 
+                padding: 0;
               }
-              p { 
-                margin: 0.25em 0; 
-                line-height: ${scaledTextFont.lineHeight};
-              }
-              ul, ol { 
-                margin-top: 2px; 
-                margin-bottom: 2px; 
-                line-height: ${scaledTextFont.lineHeight};
-              }
+              p { margin: 4px 0; }
+              ul, ol { margin-top: 2px; margin-bottom: 2px; }
               table { 
                 width: 100%; 
                 border-collapse: collapse;
               }
-              th, td { 
-                border: 1px solid rgba(127,127,127,0.35); 
-                padding: 4px 6px; 
-                line-height: ${scaledTextFont.lineHeight};
-              }
+              th, td { border: 1px solid rgb(200,200,200); padding: 4px 6px; }
               a { 
                 color: #6aa9ff; 
                 text-decoration: none; 
               }
-              h1, h2, h3, h4, h5, h6 {
-                line-height: ${scaledTextFont.lineHeight * 1.2f};
-                margin: 0.5em 0 0.25em 0;
-              }
+              h1, h2, h3, h4, h5, h6 { margin: 8px 0 4px 0; }
             </style>
         """.trimIndent()
 

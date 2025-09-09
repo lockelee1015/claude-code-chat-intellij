@@ -23,6 +23,19 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CustomShortcutSet
 import com.intellij.openapi.actionSystem.IdeActions
+import com.intellij.openapi.editor.colors.CodeInsightColors
+import com.intellij.openapi.editor.colors.EditorColorsManager
+import com.intellij.openapi.editor.event.EditorMouseEvent
+import com.intellij.openapi.editor.event.EditorMouseListener
+import com.intellij.openapi.editor.event.EditorMouseMotionListener
+import com.intellij.openapi.editor.markup.HighlighterLayer
+import com.intellij.openapi.editor.markup.RangeHighlighter
+import com.intellij.openapi.editor.markup.TextAttributes
+import com.intellij.openapi.editor.markup.EffectType
+import com.intellij.openapi.util.TextRange
+import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.ui.popup.JBPopupFactory
 import kotlinx.coroutines.*
 import java.awt.*
 import java.awt.event.KeyAdapter
@@ -91,6 +104,9 @@ class ChatInputBar(
 
         // Install Enter-to-send on this editor (Shift+Enter inserts newline)
         installEnterToSend(inputEditor)
+
+        // Install @file hyperlink highlighting + Cmd/Ctrl+Click navigation
+        installFileReferenceHyperlinks(inputEditor)
 
 
         // Setup status bar
@@ -286,6 +302,123 @@ class ChatInputBar(
                 }
             }
         })
+    }
+
+    // --- Hyperlink support for @file references ---
+    private val linkHighlighters = mutableListOf<RangeHighlighter>()
+    private val linkRanges = mutableListOf<TextRange>()
+
+    private fun installFileReferenceHyperlinks(editor: Editor) {
+        // Re-scan and highlight on text change
+        inputDocument.addDocumentListener(object : DocumentListener {
+            override fun documentChanged(event: DocumentEvent) {
+                refreshFileReferenceLinks(editor)
+            }
+        })
+        refreshFileReferenceLinks(editor)
+
+        // Mouse motion: show hand cursor when hovering a link (with or without modifier)
+        val motionListener = object : EditorMouseMotionListener {
+            override fun mouseMoved(e: EditorMouseEvent) {
+                if (e.editor !== editor) return
+                val offset = offsetAt(e)
+                val hovering = linkRanges.any { it.containsOffset(offset) }
+                editor.contentComponent.cursor = if (hovering) Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) else Cursor.getDefaultCursor()
+            }
+        }
+        EditorFactory.getInstance().eventMulticaster.addEditorMouseMotionListener(motionListener, project)
+
+        // Mouse click: Cmd/Ctrl + click to open the file
+        val clickListener = object : EditorMouseListener {
+            override fun mouseClicked(e: EditorMouseEvent) {
+                if (e.editor !== editor) return
+                val me = e.mouseEvent
+                val modifierDown = me.isMetaDown || me.isControlDown
+                if (!modifierDown) return
+                val offset = offsetAt(e)
+                val link = linkRanges.firstOrNull { it.containsOffset(offset) } ?: return
+                val token = inputDocument.getText(link).removePrefix("@")
+                openFileToken(token)
+                me.consume()
+            }
+        }
+        EditorFactory.getInstance().eventMulticaster.addEditorMouseListener(clickListener, project)
+    }
+
+    private fun TextRange.containsOffset(offset: Int): Boolean = offset in startOffset until endOffset
+
+    private fun offsetAt(e: EditorMouseEvent): Int {
+        val p = e.mouseEvent.point
+        val visual = e.editor.xyToVisualPosition(p)
+        val logical = e.editor.visualToLogicalPosition(visual)
+        return e.editor.logicalPositionToOffset(logical)
+    }
+
+    private fun refreshFileReferenceLinks(editor: Editor) {
+        try {
+            // clear
+            linkHighlighters.forEach { it.dispose() }
+            linkHighlighters.clear()
+            linkRanges.clear()
+
+            val text = inputDocument.text ?: return
+            val regex = Regex("@([\\w./-]+)")
+            val scheme = EditorColorsManager.getInstance().globalScheme
+            val attrs = scheme.getAttributes(CodeInsightColors.HYPERLINK_ATTRIBUTES)
+                ?: TextAttributes().apply {
+                    foregroundColor = JBColor.BLUE
+                    effectType = EffectType.LINE_UNDERSCORE
+                    effectColor = JBColor.BLUE
+                }
+            for (m in regex.findAll(text)) {
+                val range = TextRange(m.range.first, m.range.last + 1)
+                linkRanges.add(range)
+                val h = editor.markupModel.addRangeHighlighter(
+                    range.startOffset,
+                    range.endOffset,
+                    HighlighterLayer.ADDITIONAL_SYNTAX,
+                    attrs,
+                    com.intellij.openapi.editor.markup.HighlighterTargetArea.EXACT_RANGE
+                )
+                linkHighlighters.add(h)
+            }
+        } catch (_: Exception) {
+            // don't break UI if any issue occurs
+        }
+    }
+
+    private fun openFileToken(token: String) {
+        // If the token contains '/', treat as relative path under project
+        val vfs: List<VirtualFile> = if (token.contains('/')) {
+            val base = project.basePath
+            if (base != null) {
+                val io = java.io.File(base, token)
+                LocalFileSystem.getInstance().findFileByIoFile(io)?.let { listOf(it) } ?: emptyList()
+            } else emptyList()
+        } else {
+            // Search by file name
+            val scope = com.intellij.psi.search.GlobalSearchScope.projectScope(project)
+            com.intellij.psi.search.FilenameIndex.getVirtualFilesByName(token, scope).toList()
+        }
+        when {
+            vfs.isEmpty() -> {}
+            vfs.size == 1 -> FileEditorManager.getInstance(project).openFile(vfs.first(), true)
+            else -> {
+                val base = project.basePath
+                val items = vfs.map { vf ->
+                    if (base != null) java.nio.file.Paths.get(base).relativize(java.nio.file.Paths.get(vf.path)).toString() else vf.path
+                }
+                JBPopupFactory.getInstance()
+                    .createPopupChooserBuilder(items)
+                    .setTitle("Open file")
+                    .setItemChosenCallback { selected ->
+                        val idx = items.indexOf(selected)
+                        if (idx >= 0) FileEditorManager.getInstance(project).openFile(vfs[idx], true)
+                    }
+                    .createPopup()
+                    .showInCenterOf(this)
+            }
+        }
     }
 
     // --- Enter to Send wiring ---
