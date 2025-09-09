@@ -213,15 +213,17 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         
         scope.launch {
             sessionViewModel.sessionMetrics.collect { metrics ->
-                println("DEBUG: sessionMetrics collected - input=${metrics.totalInputTokens}, output=${metrics.totalOutputTokens}, cacheRead=${metrics.cacheReadInputTokens}, cacheCreation=${metrics.cacheCreationInputTokens}")
-                println("DEBUG: Metrics summary - total=${metrics.totalInputTokens + metrics.totalOutputTokens}, wasResumed=${metrics.wasResumed}")
+                println("DEBUG: sessionMetrics collected - input=${metrics.totalInputTokens}, output=${metrics.totalOutputTokens}, cacheRead=${metrics.cacheReadInputTokens}, cacheCreation=${metrics.cacheCreationInputTokens}, tools=${metrics.toolsExecuted}, mcp=${metrics.mcpCalls}")
+                println("DEBUG: Metrics summary - total=${metrics.totalInputTokens + metrics.totalOutputTokens}, wasResumed=${metrics.wasResumed}, tools=${metrics.toolsExecuted}, mcp=${metrics.mcpCalls}")
                 val currentSessionId = sessionViewModel.currentSession.value?.sessionId
                 chatInputBar.updateTokenUsage(
                     metrics.totalInputTokens, 
                     metrics.totalOutputTokens,
                     metrics.cacheReadInputTokens,
                     metrics.cacheCreationInputTokens,
-                    currentSessionId
+                    currentSessionId,
+                    metrics.toolsExecuted,
+                    metrics.mcpCalls
                 )
             }
         }
@@ -316,7 +318,7 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         )
         
         // Add directly to UI without going through session
-        messagesPanel.add(createMessageComponent("ℹ️", JBColor.BLUE, content, JBColor.foreground()))
+        messagesPanel.add(createMessageComponent("ℹ️", JBColor.BLUE, content, JBColor.foreground(), null, null, null))
         messagesPanel.add(Box.createVerticalStrut(8))
         messagesPanel.add(Box.createVerticalGlue())
         
@@ -354,18 +356,29 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                     messagesPanel.add(Box.createVerticalStrut(8))
                 }
                 
+                // Render in strict chronological order (no aggregation)
                 for (group in groupedMessages) {
                     val messageComponent = when (group.type) {
-                        "user" -> createMessageComponent(">", secondaryTextColor(), group.content, secondaryTextColor())
-                        "assistant" -> createMessageComponent("●", JBColor.foreground(), group.content, JBColor.foreground())
-                        "tool_interaction" -> ToolRendererFactory.createToolCard(
-                            group.toolUse?.name ?: "Unknown",
-                            group.toolUse?.input,
-                            group.toolResult?.content ?: group.toolResult?.text ?: "",
-                            group.toolResult?.isError == true,
-                            group.toolUse?.id
+                        "user" -> createMessageComponent(
+                            ">", secondaryTextColor(), group.content, secondaryTextColor(),
+                            group.timestamp, group.messageId, group.leafUuid
                         )
-                        "error" -> createMessageComponent("●", Color.decode("#FF6B6B"), group.content, Color.decode("#FF6B6B"))
+                        "assistant" -> createMessageComponent(
+                            "●", JBColor.foreground(), group.content, JBColor.foreground(),
+                            group.timestamp, group.messageId, group.leafUuid
+                        )
+                        "tool_interaction" -> wrapWithMeta(
+                            ToolRendererFactory.createToolCard(
+                                group.toolUse?.name ?: "Unknown",
+                                group.toolUse?.input,
+                                group.toolResult?.content ?: group.toolResult?.text ?: "",
+                                group.toolResult?.isError == true,
+                                group.toolUse?.id
+                        ), group.timestamp, group.messageId, group.leafUuid)
+                        "error" -> createMessageComponent(
+                            "●", Color.decode("#FF6B6B"), group.content, Color.decode("#FF6B6B"),
+                            group.timestamp, group.messageId, group.leafUuid
+                        )
                         else -> null
                     }
                     
@@ -403,12 +416,16 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         val type: String, // "user", "assistant", "tool_interaction", "error"
         val content: String = "",
         val toolUse: com.claudecodechat.models.Content? = null,
-        val toolResult: com.claudecodechat.models.Content? = null
+        val toolResult: com.claudecodechat.models.Content? = null,
+        val timestamp: String? = null,
+        val messageId: String? = null,
+        val leafUuid: String? = null
     )
     
     private fun groupToolMessages(messages: List<ClaudeStreamMessage>): List<MessageGroup> {
         val groups = mutableListOf<MessageGroup>()
         val pendingToolUses = mutableMapOf<String, com.claudecodechat.models.Content>()
+        val toolUseIndex = mutableMapOf<String, Int>()
         
         for (message in messages) {
             when (message.type) {
@@ -421,22 +438,33 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                     // Check if this user message contains tool results
                     val toolResults = message.message?.content?.filter { it.type == com.claudecodechat.models.ContentType.TOOL_RESULT }
                     if (toolResults?.isNotEmpty() == true) {
-                        // This is a tool result message, try to pair with pending tool uses
+                        // This is a tool result message, try to merge into existing placeholder first (original position)
                         for (toolResult in toolResults) {
                             val toolUseId = toolResult.toolUseId
-                            if (toolUseId != null && pendingToolUses.containsKey(toolUseId)) {
+                            if (toolUseId != null && toolUseIndex.containsKey(toolUseId)) {
+                                val idx = toolUseIndex[toolUseId]!!
+                                val g = groups[idx]
+                                groups[idx] = g.copy(toolResult = toolResult)
+                                pendingToolUses.remove(toolUseId)
+                            } else if (toolUseId != null && pendingToolUses.containsKey(toolUseId)) {
                                 val toolUse = pendingToolUses.remove(toolUseId)
                                 groups.add(MessageGroup(
                                     type = "tool_interaction",
                                     toolUse = toolUse,
-                                    toolResult = toolResult
+                                    toolResult = toolResult,
+                                    timestamp = message.timestamp,
+                                    messageId = message.message?.id,
+                                    leafUuid = message.leafUuid
                                 ))
                             } else {
                                 // Orphaned tool result
                                 groups.add(MessageGroup(
                                     type = "tool_interaction",
                                     toolUse = null,
-                                    toolResult = toolResult
+                                    toolResult = toolResult,
+                                    timestamp = message.timestamp,
+                                    messageId = message.message?.id,
+                                    leafUuid = message.leafUuid
                                 ))
                             }
                         }
@@ -446,10 +474,26 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                         if (userText.contains("<command-message>") && userText.contains("<command-name>")) {
                             val commandDisplay = formatCommandMessage(userText)
                             if (commandDisplay.isNotEmpty()) {
-                                groups.add(MessageGroup(type = "user", content = commandDisplay))
+                                groups.add(
+                                    MessageGroup(
+                                        type = "user",
+                                        content = commandDisplay,
+                                        timestamp = message.timestamp,
+                                        messageId = message.message?.id,
+                                        leafUuid = message.leafUuid
+                                    )
+                                )
                             }
                         } else if (userText.isNotEmpty()) {
-                            groups.add(MessageGroup(type = "user", content = userText.trimStart()))
+                            groups.add(
+                                MessageGroup(
+                                    type = "user",
+                                    content = userText.trimStart(),
+                                    timestamp = message.timestamp,
+                                    messageId = message.message?.id,
+                                    leafUuid = message.leafUuid
+                                )
+                            )
                         }
                     }
                 }
@@ -458,13 +502,66 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                         when (content.type) {
                             com.claudecodechat.models.ContentType.TEXT -> {
                                 if (content.text != null && content.text.isNotEmpty()) {
-                                    groups.add(MessageGroup(type = "assistant", content = content.text.trimStart()))
+                                    groups.add(
+                                        MessageGroup(
+                                            type = "assistant",
+                                            content = content.text.trimStart(),
+                                            timestamp = message.timestamp,
+                                            messageId = message.message?.id,
+                                            leafUuid = message.leafUuid
+                                        )
+                                    )
                                 }
                             }
                             com.claudecodechat.models.ContentType.TOOL_USE -> {
-                                // Store tool use for later pairing with result
-                                if (content.id != null) {
-                                    pendingToolUses[content.id] = content
+                                // Insert a placeholder at current timeline position, and record index
+                                val id = content.id
+                                if (id != null) {
+                                    pendingToolUses[id] = content
+                                    val idx = groups.size
+                                    groups.add(
+                                        MessageGroup(
+                                            type = "tool_interaction",
+                                            toolUse = content,
+                                            toolResult = null,
+                                            timestamp = message.timestamp,
+                                            messageId = message.message?.id,
+                                            leafUuid = message.leafUuid
+                                        )
+                                    )
+                                    toolUseIndex[id] = idx
+                                }
+                            }
+                            com.claudecodechat.models.ContentType.TOOL_RESULT -> {
+                                val toolUseId = content.toolUseId
+                                if (toolUseId != null && toolUseIndex.containsKey(toolUseId)) {
+                                    val idx = toolUseIndex[toolUseId]!!
+                                    val g = groups[idx]
+                                    groups[idx] = g.copy(toolResult = content)
+                                    pendingToolUses.remove(toolUseId)
+                                } else if (toolUseId != null && pendingToolUses.containsKey(toolUseId)) {
+                                    val toolUse = pendingToolUses.remove(toolUseId)
+                                    groups.add(
+                                        MessageGroup(
+                                            type = "tool_interaction",
+                                            toolUse = toolUse,
+                                            toolResult = content,
+                                            timestamp = message.timestamp,
+                                            messageId = message.message?.id,
+                                            leafUuid = message.leafUuid
+                                        )
+                                    )
+                                } else {
+                                    groups.add(
+                                        MessageGroup(
+                                            type = "tool_interaction",
+                                            toolUse = null,
+                                            toolResult = content,
+                                            timestamp = message.timestamp,
+                                            messageId = message.message?.id,
+                                            leafUuid = message.leafUuid
+                                        )
+                                    )
                                 }
                             }
                             else -> {}
@@ -473,19 +570,18 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                 }
                 MessageType.ERROR -> {
                     val errorText = message.error?.message ?: "Unknown error"
-                    groups.add(MessageGroup(type = "error", content = errorText))
+                    groups.add(
+                        MessageGroup(
+                            type = "error",
+                            content = errorText,
+                            timestamp = message.timestamp,
+                            messageId = message.message?.id,
+                            leafUuid = message.leafUuid
+                        )
+                    )
                 }
                 else -> {}
             }
-        }
-        
-        // Handle any remaining unpaired tool uses
-        for (toolUse in pendingToolUses.values) {
-            groups.add(MessageGroup(
-                type = "tool_interaction",
-                toolUse = toolUse,
-                toolResult = null
-            ))
         }
         
         return groups
@@ -534,7 +630,15 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
     /**
      * Create a message component with icon and content in DIV-like layout
      */
-    private fun createMessageComponent(iconText: String, iconColor: Color, content: String, textColor: Color): JPanel {
+    private fun createMessageComponent(
+        iconText: String,
+        iconColor: Color,
+        content: String,
+        textColor: Color,
+        timestamp: String?,
+        messageId: String?,
+        leafUuid: String?
+    ): JPanel {
         return JBPanel<JBPanel<*>>(BorderLayout()).apply {
             border = JBUI.Borders.empty(4, 0, 4, 0) // 适量的内边距
             background = getMessageAreaBackgroundColor() // 使用主题自适应背景色
@@ -542,18 +646,19 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
             // 设置最大高度以防止过度拉伸
             maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
             
-            // Icon area (left side) - fixed width, top aligned
+            // Prepare icon label early so we can compute baseline offset later
+            val iconLabel = JBLabel(iconText).apply {
+                foreground = iconColor
+                font = Font(Font.MONOSPACED, Font.BOLD, 12)
+                horizontalAlignment = SwingConstants.LEFT
+                verticalAlignment = SwingConstants.TOP
+            }
+
+            // Icon area (left side) - fixed width; baseline tweak applied after content is built
             val iconPanel = JBPanel<JBPanel<*>>(BorderLayout()).apply {
                 background = getMessageAreaBackgroundColor() // 使用主题自适应背景色
                 preferredSize = Dimension(20, -1) // 统一宽度与工具图标一致
                 maximumSize = Dimension(20, Int.MAX_VALUE)
-                
-                val iconLabel = JBLabel(iconText).apply {
-                    foreground = iconColor
-                    font = Font(Font.MONOSPACED, Font.BOLD, 12)  // 调整为12号字体
-                    horizontalAlignment = SwingConstants.LEFT
-                    verticalAlignment = SwingConstants.TOP
-                }
                 add(iconLabel, BorderLayout.NORTH)
             }
             add(iconPanel, BorderLayout.WEST)
@@ -567,12 +672,80 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
 
             val (ctx, stripped) = extractIdeContext(content)
             val contentArea = createWrappingContentArea(stripped, textColor)
+            try { contentArea.alignmentX = LEFT_ALIGNMENT } catch (_: Exception) {}
             right.add(contentArea)
             if (ctx != null) {
-                right.add(createContextSeparator())
+                // No separator line; keep file context chip flush-left under the message
                 right.add(buildContextChip(ctx))
             }
+
+            // Debug meta (timestamp/id/leaf) placed below message content for minimal intrusion
+            if (com.claudecodechat.settings.ClaudeSettings.getInstance().debugMode && (!timestamp.isNullOrBlank() || !messageId.isNullOrBlank() || !leafUuid.isNullOrBlank())) {
+                right.add(Box.createVerticalStrut(2))
+                val metaText = buildDebugMeta(timestamp, messageId, leafUuid)
+                val ts = JLabel(metaText).apply {
+                    foreground = secondaryTextColor()
+                    font = Font(Font.MONOSPACED, Font.PLAIN, 10)
+                }
+                val metaRow = JBPanel<JBPanel<*>>(BorderLayout()).apply {
+                    isOpaque = false
+                    add(ts, BorderLayout.WEST) // stick to left edge
+                }
+                try { metaRow.alignmentX = LEFT_ALIGNMENT } catch (_: Exception) {}
+                right.add(metaRow)
+            }
+
+            // After content is built, adjust icon panel top inset to align baselines
+            try {
+                val ascent = (contentArea.getClientProperty("firstLineAscent") as? Int) ?: 0
+                val fmIcon = iconLabel.getFontMetrics(iconLabel.font)
+                // Slight downward tweak to better match visual baseline
+                val tweak = JBUI.scale(1)
+                val topInset = (ascent - fmIcon.ascent + tweak).coerceAtLeast(0)
+                iconPanel.border = JBUI.Borders.empty(topInset, 0, 0, 0)
+            } catch (_: Exception) {}
             add(right, BorderLayout.CENTER)
+        }
+    }
+
+    private fun wrapWithMeta(component: JComponent, timestamp: String?, messageId: String?, leafUuid: String?): JComponent {
+        if (!com.claudecodechat.settings.ClaudeSettings.getInstance().debugMode) return component
+        if (timestamp.isNullOrBlank() && messageId.isNullOrBlank() && leafUuid.isNullOrBlank()) return component
+        val panel = JBPanel<JBPanel<*>>(BorderLayout()).apply {
+            isOpaque = false
+        }
+        val ts = JLabel(buildDebugMeta(timestamp, messageId, leafUuid)).apply {
+            foreground = secondaryTextColor()
+            font = Font(Font.MONOSPACED, Font.PLAIN, 10)
+        }
+        val bottom = JBPanel<JBPanel<*>>(BorderLayout()).apply {
+            isOpaque = false
+            border = JBUI.Borders.empty(2, 0, 0, 0)
+            add(ts, BorderLayout.WEST)
+        }
+        panel.add(component, BorderLayout.CENTER)
+        panel.add(bottom, BorderLayout.SOUTH)
+        return panel
+    }
+
+    private fun buildDebugMeta(tsRaw: String?, messageId: String?, leafUuid: String?): String {
+        val parts = mutableListOf<String>()
+        val ts = tsRaw?.let { formatTimestampForDebug(it) }
+        if (!ts.isNullOrBlank()) parts.add(ts)
+        if (!messageId.isNullOrBlank()) parts.add("id=" + messageId.take(8))
+        if (!leafUuid.isNullOrBlank()) parts.add("leaf=" + leafUuid.take(8))
+        return parts.joinToString("  ")
+    }
+
+    private fun formatTimestampForDebug(raw: String): String {
+        // Best-effort: show raw or HH:mm:ss.SSS extracted if possible
+        return try {
+            // Try java.time parsing if available
+            val instant = java.time.Instant.parse(raw)
+            val zdt = java.time.ZonedDateTime.ofInstant(instant, java.time.ZoneId.systemDefault())
+            zdt.toLocalTime().toString()
+        } catch (_: Exception) {
+            raw
         }
     }
 
@@ -649,14 +822,8 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         }
         panel.add(icon)
         panel.add(label)
-        // Add ~2ch left indent to the chip block
-        try {
-            val fm = label.getFontMetrics(label.font)
-            val ch = fm.charWidth('m')
-            panel.border = JBUI.Borders.empty(0, ch * 2, 0, 0)
-        } catch (_: Exception) {
-            panel.border = JBUI.Borders.empty(0, JBUI.scale(16), 0, 0)
-        }
+        // No extra left indent; keep flush with left content edge
+        panel.border = JBUI.Borders.empty(0, 0, 0, 0)
 
         // Clickable: open file at caret/selection
         val open: () -> Unit = {
@@ -1351,6 +1518,11 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                     overrideForeground = textColor,
                 )
             )
+            // Expose an approximate first-line ascent for baseline alignment
+            try {
+                val fm = component.getFontMetrics(component.font)
+                putClientProperty("firstLineAscent", fm.ascent)
+            } catch (_: Exception) {}
             add(component, BorderLayout.CENTER)
         }
     }

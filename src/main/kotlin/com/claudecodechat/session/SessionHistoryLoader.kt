@@ -347,10 +347,24 @@ class SessionHistoryLoader {
             "tool_result" -> Content(
                 type = ContentType.TOOL_RESULT,
                 toolUseId = element["tool_use_id"]?.jsonPrimitive?.content,
-                content = element["content"]?.jsonPrimitive?.content,
+                content = extractToolResultText(element["content"]),
                 isError = element["is_error"]?.jsonPrimitive?.content == "true"
             )
             else -> null
+        }
+    }
+
+    private fun extractToolResultText(node: JsonElement?): String? {
+        if (node == null) return null
+        return when (node) {
+            is JsonPrimitive -> node.content
+            is JsonArray -> node.joinToString("\n") { el ->
+                val obj = el as? JsonObject
+                val t = obj?.get("type")?.jsonPrimitive?.content
+                if (t == "text") obj.get("text")?.jsonPrimitive?.content ?: "" else el.toString()
+            }.trim()
+            is JsonObject -> node.toString()
+            else -> node.toString()
         }
     }
     

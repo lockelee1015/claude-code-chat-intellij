@@ -110,6 +110,7 @@ data class SessionMetrics(
     var filesCreated: Int = 0,
     var filesModified: Int = 0,
     var filesDeleted: Int = 0,
+    var mcpCalls: Int = 0,
     var codeBlocksGenerated: Int = 0,
     var errorsEncountered: Int = 0,
     var checkpointCount: Int = 0,
@@ -120,4 +121,3 @@ data class SessionMetrics(
     var cacheReadInputTokens: Int = 0,
     var cacheCreationInputTokens: Int = 0
 )
-

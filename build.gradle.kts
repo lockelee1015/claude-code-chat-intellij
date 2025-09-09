@@ -44,6 +44,7 @@ dependencies {
     intellijPlatform {
         // Use IntelliJ Platform with broad version support
         intellijIdeaCommunity("2025.1")
+        // JSON APIs are provided by platform modules; no extra bundledPlugins needed
         pluginVerifier()
         zipSigner()
         testFramework(TestFrameworkType.Platform)

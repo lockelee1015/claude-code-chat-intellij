@@ -2,8 +2,6 @@ package com.claudecodechat.ui.swing
 
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.editor.*
-import com.intellij.openapi.editor.actionSystem.EditorActionHandler
-import com.intellij.openapi.editor.actionSystem.EditorActionManager
 import com.intellij.openapi.editor.event.CaretEvent
 import com.intellij.openapi.editor.event.CaretListener
 import com.intellij.openapi.editor.event.DocumentEvent
@@ -22,7 +20,6 @@ import com.intellij.codeInsight.lookup.LookupManager
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CustomShortcutSet
-import com.intellij.openapi.actionSystem.IdeActions
 import com.intellij.openapi.editor.colors.CodeInsightColors
 import com.intellij.openapi.editor.colors.EditorColorsManager
 import com.intellij.openapi.editor.event.EditorMouseEvent
@@ -37,6 +34,7 @@ import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import kotlinx.coroutines.*
+import com.claudecodechat.persistence.SessionPersistence
 import java.awt.*
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
@@ -60,6 +58,8 @@ class ChatInputBar(
     // UI - Using IntelliJ Editor instead of JTextArea
     private lateinit var inputEditor: Editor
     private lateinit var inputDocument: Document
+    private var inputIoFile: java.io.File? = null
+    private var inputVFile: com.intellij.openapi.vfs.VirtualFile? = null
     private val modelComboBox: JComboBox<String> = JComboBox(arrayOf("auto", "sonnet", "opus", "haiku"))
     // 智能按钮：发送时显示为停止按钮，停止时显示为发送按钮
     private val smartButton: JButton = JButton().apply {
@@ -73,6 +73,10 @@ class ChatInputBar(
     }
 
     private val currentFileLabel: JLabel = JLabel("")
+    private val mcpButton: JButton = JButton("MCP").apply {
+        toolTipText = "Configure MCP servers for this session"
+        preferredSize = Dimension(52, 28)
+    }
     
     // 合并的状态栏：显示 context 和 loading 信息
     private val statusBar: JBPanel<JBPanel<*>> = JBPanel(BorderLayout())
@@ -103,7 +107,9 @@ class ChatInputBar(
         inputEditor = editor
         inputDocument = document
 
-        // Install Enter-to-send on this editor (Shift+Enter inserts newline)
+        // Register Enter-to-send with global manager (Shift+Enter inserts newline)
+        ChatEnterToSendManager.registerEditor(inputEditor) { sendMessage() }
+        // Also bind Shift+Enter to insert newline
         installEnterToSend(inputEditor)
 
         // Install @file hyperlink highlighting + Cmd/Ctrl+Click navigation
@@ -145,8 +151,9 @@ class ChatInputBar(
                     alignmentY = CENTER_ALIGNMENT
                 }
                 
-                // 添加顺序：plan checkbox, 模型选择, 智能按钮
+                // 添加顺序：plan checkbox, MCP, 模型选择, 智能按钮
                 add(planModeCheckBox)
+                add(mcpButton)
                 add(modelComboBox)
                 add(smartButton)
             }
@@ -181,27 +188,46 @@ class ChatInputBar(
             }
         }
         setupFileInfoTracking()
+
+        // MCP config button: open dialog with selection and editor
+        mcpButton.addActionListener {
+            val logicalId = com.claudecodechat.state.SessionViewModel.getInstance(project).currentLogicalSessionId()
+            val dlg = McpConfigDialog(project, logicalId)
+            dlg.show()
+            // refresh button text with selection count
+            if (logicalId != null) {
+                val count = SessionPersistence.getInstance(project).getSelectedMcpServers(logicalId).size
+                mcpButton.text = if (count > 0) "MCP($count)" else "MCP"
+            }
+        }
+
+        // Initialize MCP button label with current selection count
+        try {
+            val logicalId = com.claudecodechat.state.SessionViewModel.getInstance(project).currentLogicalSessionId()
+            if (logicalId != null) {
+                val count = SessionPersistence.getInstance(project).getSelectedMcpServers(logicalId).size
+                mcpButton.text = if (count > 0) "MCP($count)" else "MCP"
+            }
+        } catch (_: Exception) { }
     }
     
     /**
-     * Create IntelliJ Editor for chat input with PSI support using actual file
+     * Create IntelliJ Editor for chat input with PSI support using a unique file per tab
      */
     private fun createInputEditor(): Pair<Editor, Document> {
-        // Create actual file for better PSI support
+        // Create a unique real file for better PSI and completion support (per tab)
         val projectBasePath = project.basePath ?: System.getProperty("user.home")
         val chatInputDir = java.io.File(projectBasePath, ".chat-input")
-        if (!chatInputDir.exists()) {
-            chatInputDir.mkdirs()
-        }
-
-        val chatInputFile = java.io.File(chatInputDir, "chat-input.md")
-        if (!chatInputFile.exists()) {
-            chatInputFile.writeText("")
-        }
+        if (!chatInputDir.exists()) chatInputDir.mkdirs()
+        val uniqueName = "chat-input-" + java.util.UUID.randomUUID().toString().substring(0, 8) + ".md"
+        val chatInputFile = java.io.File(chatInputDir, uniqueName)
+        if (!chatInputFile.exists()) chatInputFile.writeText("")
+        inputIoFile = chatInputFile
 
         // Get the virtual file from the actual file
-        val virtualFile = com.intellij.openapi.vfs.LocalFileSystem.getInstance().findFileByIoFile(chatInputFile)
+        val virtualFile = com.intellij.openapi.vfs.LocalFileSystem.getInstance().refreshAndFindFileByIoFile(chatInputFile)
             ?: throw IllegalStateException("Cannot find virtual file for ${chatInputFile.absolutePath}")
+        inputVFile = virtualFile
 
         // Create document from the file
         val document = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance().getDocument(virtualFile)
@@ -423,40 +449,13 @@ class ChatInputBar(
     }
 
     // --- Enter to Send wiring ---
-    private var originalEnterHandler: EditorActionHandler? = null
-    private var customEnterHandler: EditorActionHandler? = null
     private var shiftEnterAction: AnAction? = null
 
     private fun installEnterToSend(chatEditor: Editor) {
-        val mgr = EditorActionManager.getInstance()
-        val actionId = IdeActions.ACTION_EDITOR_ENTER
-        val prev = mgr.getActionHandler(actionId)
-        originalEnterHandler = prev
-
-        val custom = object : EditorActionHandler() {
-            override fun doExecute(editor: Editor, caret: Caret?, dataContext: com.intellij.openapi.actionSystem.DataContext) {
-                // 仅拦截我们的聊天输入 editor
-                if (editor === chatEditor) {
-                    // 若有补全列表，保持默认 Enter 行为
-                    if (LookupManager.getActiveLookup(editor) != null) {
-                        originalEnterHandler?.execute(editor, caret, dataContext)
-                        return
-                    }
-                    // 回车即发送
-                    sendMessage()
-                    return // 不调用 original -> 不插入换行
-                }
-                // 其他编辑器默认行为
-                originalEnterHandler?.execute(editor, caret, dataContext)
-            }
-        }
-        customEnterHandler = custom
-        mgr.setActionHandler(actionId, custom)
-
-        // Shift+Enter 在聊天 editor 中插入换行（调用原始 Enter 处理器）
+        // Only bind Shift+Enter to insert newline using original handler through manager
         val shiftAct = object : AnAction() {
             override fun actionPerformed(e: AnActionEvent) {
-                originalEnterHandler?.execute(chatEditor, chatEditor.caretModel.currentCaret, e.dataContext)
+                ChatEnterToSendManager.executeOriginalEnter(chatEditor, chatEditor.caretModel.currentCaret, e.dataContext)
             }
         }
         shiftAct.registerCustomShortcutSet(
@@ -527,7 +526,15 @@ class ChatInputBar(
     /**
      * Update token usage information in the status bar
      */
-    fun updateTokenUsage(inputTokens: Int, outputTokens: Int, cacheReadTokens: Int = 0, cacheCreationTokens: Int = 0, sessionId: String? = null) {
+    fun updateTokenUsage(
+        inputTokens: Int,
+        outputTokens: Int,
+        cacheReadTokens: Int = 0,
+        cacheCreationTokens: Int = 0,
+        sessionId: String? = null,
+        toolsExecuted: Int = 0,
+        mcpCalls: Int = 0
+    ) {
         val contextLength = inputTokens + cacheReadTokens + cacheCreationTokens
         contextLength + outputTokens
         
@@ -536,7 +543,7 @@ class ChatInputBar(
             return if (tokens >= 1000) "${String.format("%.1f", tokens / 1000.0)}k" else tokens.toString()
         }
         
-        val displayText = if (contextLength > 0 || outputTokens > 0) {
+        var displayText = if (contextLength > 0 || outputTokens > 0) {
             if (cacheReadTokens > 0 || cacheCreationTokens > 0) {
                 "Context: ${formatTokens(contextLength)} (${formatTokens(inputTokens)}↑ + ${formatTokens(cacheReadTokens)} cache read + ${formatTokens(cacheCreationTokens)} cache creation) | Output: ${formatTokens(outputTokens)}↓"
             } else {
@@ -544,6 +551,11 @@ class ChatInputBar(
             }
         } else {
             "Context: Ready"
+        }
+
+        // In debug mode, append tools/mcp summary
+        if (com.claudecodechat.settings.ClaudeSettings.getInstance().debugMode) {
+            displayText += " | Tools: $toolsExecuted (MCP $mcpCalls)"
         }
         
         if (!isLoading) {
@@ -832,18 +844,22 @@ class ChatInputBar(
      */
     fun dispose() {
         scope.cancel()
-        // Restore Enter handler
-        try {
-            val actionId = IdeActions.ACTION_EDITOR_ENTER
-            val mgr = EditorActionManager.getInstance()
-            val current = mgr.getActionHandler(actionId)
-            if (current === customEnterHandler && originalEnterHandler != null) {
-                mgr.setActionHandler(actionId, originalEnterHandler!!)
-            }
-        } catch (_: Exception) { }
+        // Unregister from global manager
+        try { ChatEnterToSendManager.unregisterEditor(inputEditor) } catch (_: Exception) { }
         // Unregister Shift+Enter shortcut
         try {
             shiftEnterAction?.unregisterCustomShortcutSet(inputEditor.contentComponent)
+        } catch (_: Exception) { }
+        // Release editor and clean up unique file
+        try {
+            EditorFactory.getInstance().releaseEditor(inputEditor)
+        } catch (_: Exception) { }
+        try {
+            val io = inputIoFile
+            if (io != null && io.exists()) {
+                io.delete()
+                com.intellij.openapi.vfs.LocalFileSystem.getInstance().refreshIoFiles(listOf(io))
+            }
         } catch (_: Exception) { }
     }
 }

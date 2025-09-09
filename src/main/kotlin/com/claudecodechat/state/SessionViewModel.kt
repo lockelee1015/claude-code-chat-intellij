@@ -35,6 +35,8 @@ class SessionViewModel(private val project: Project) : Disposable {
     private var userHasSelectedSession = false
     // Current logical session id (groups multiple CLI sessions)
     private var currentLogicalId: String? = null
+
+    fun currentLogicalSessionId(): String? = currentLogicalId
     
     init {
         // Set up file watcher for real-time updates
@@ -191,6 +193,7 @@ class SessionViewModel(private val project: Project) : Disposable {
                 val currentSessionId = _currentSession.value?.sessionId
                 logger.info("Sending prompt with session management: sessionId=$currentSessionId, resume=${currentSessionId != null}")
                 
+                val mcpConfig = buildMcpConfigForCurrentSession()
                 val options = ClaudeCliService.ExecuteOptions(
                     prompt = prompt,
                     model = model,
@@ -199,7 +202,8 @@ class SessionViewModel(private val project: Project) : Disposable {
                     continueSession = false, // 不使用 -c，让用户明确控制session创建
                     verbose = true,
                     skipPermissions = true,
-                    permissionMode = if (planMode) "plan" else null
+                    permissionMode = if (planMode) "plan" else null,
+                    mcpConfigJson = mcpConfig
                 )
                 
                 // Execute Claude Code CLI with callback
@@ -227,6 +231,43 @@ class SessionViewModel(private val project: Project) : Disposable {
         }.apply {
             name = "Claude-Send-Thread"
             start()
+        }
+    }
+
+    /**
+     * Build MCP config JSON string for current logical session by filtering project .mcp.json
+     */
+    private fun buildMcpConfigForCurrentSession(): String? {
+        val logicalId = currentLogicalId ?: return null
+        val projectPath = project.basePath ?: return null
+        try {
+            val cfgFile = java.io.File(projectPath, ".mcp.json")
+            if (!cfgFile.exists()) return null
+            val text = cfgFile.readText()
+            if (text.isBlank()) return null
+            val selected = sessionPersistence.getSelectedMcpServers(logicalId)
+            if (selected.isEmpty()) {
+                // If user hasn't selected, pass the whole file
+                return text
+            }
+            // Parse and filter
+            val root = kotlinx.serialization.json.Json.parseToJsonElement(text)
+            if (root !is kotlinx.serialization.json.JsonObject) return text
+            val serversKey = when {
+                "mcpServers" in root -> "mcpServers"
+                "servers" in root -> "servers"
+                else -> null
+            }
+            if (serversKey == null) return text
+            val src = root[serversKey]
+            if (src !is kotlinx.serialization.json.JsonObject) return text
+            val filteredPairs = src.filter { (name, _) -> selected.contains(name) }
+            val filteredServers = kotlinx.serialization.json.JsonObject(filteredPairs)
+            val newRoot = kotlinx.serialization.json.JsonObject(root.toMutableMap().apply { put(serversKey, filteredServers) })
+            return com.claudecodechat.utils.JsonUtils.json.encodeToString(kotlinx.serialization.json.JsonElement.serializer(), newRoot)
+        } catch (e: Exception) {
+            Logger.getInstance(SessionViewModel::class.java).warn("Failed to build MCP config: ${e.message}")
+            return null
         }
     }
     
@@ -368,7 +409,13 @@ class SessionViewModel(private val project: Project) : Disposable {
             msg.content.forEach { content ->
                 when (content.type) {
                     com.claudecodechat.models.ContentType.TOOL_USE -> {
-                        updateMetrics { it.copy(toolsExecuted = it.toolsExecuted + 1) }
+                        updateMetrics { metrics ->
+                            val isMcp = content.name?.startsWith("mcp__") == true
+                            metrics.copy(
+                                toolsExecuted = metrics.toolsExecuted + 1,
+                                mcpCalls = metrics.mcpCalls + (if (isMcp) 1 else 0)
+                            )
+                        }
                         
                         // Track file operations
                         content.name?.let { toolName ->
@@ -548,6 +595,7 @@ class SessionViewModel(private val project: Project) : Disposable {
         var cacheReadTokens = 0
         var cacheCreationTokens = 0
         var toolsExecuted = 0
+        var mcpCalls = 0
         var filesCreated = 0
         var filesModified = 0
         
@@ -583,6 +631,9 @@ class SessionViewModel(private val project: Project) : Disposable {
                         com.claudecodechat.models.ContentType.TOOL_USE -> {
                             toolsExecuted++
                             content.name?.let { toolName ->
+                                if (toolName.startsWith("mcp__")) {
+                                    mcpCalls++
+                                }
                                 when {
                                     toolName.contains("create", ignoreCase = true) ||
                                     toolName.contains("write", ignoreCase = true) -> filesCreated++
@@ -603,6 +654,7 @@ class SessionViewModel(private val project: Project) : Disposable {
             cacheReadInputTokens = cacheReadTokens,
             cacheCreationInputTokens = cacheCreationTokens,
             toolsExecuted = toolsExecuted,
+            mcpCalls = mcpCalls,
             filesCreated = filesCreated,
             filesModified = filesModified,
             wasResumed = true

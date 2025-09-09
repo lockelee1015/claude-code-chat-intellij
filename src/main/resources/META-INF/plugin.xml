@@ -80,6 +80,7 @@
         <completion.contributor
                 language="Markdown"
                 implementationClass="com.claudecodechat.completion.ChatCompletionContributor"/>
+
     </extensions>
     
     <actions>

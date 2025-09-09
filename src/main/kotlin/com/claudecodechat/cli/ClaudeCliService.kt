@@ -51,6 +51,8 @@ class ClaudeCliService(private val project: Project) {
         val verbose: Boolean = true,
         val skipPermissions: Boolean = true,
         val permissionMode: String? = null,
+        val mcpConfigJson: String? = null,
+        val strictMcp: Boolean = false,
         val customArgs: List<String> = emptyList()
     )
     
@@ -325,7 +327,20 @@ class ClaudeCliService(private val project: Project) {
         if (options.skipPermissions) {
             args.add("--dangerously-skip-permissions")
         }
+
+        // MCP config
+        options.mcpConfigJson?.let { cfg ->
+            if (cfg.isNotBlank()) {
+                args.add("--mcp-config")
+                args.add(cfg)
+            }
+        }
+        if (options.strictMcp) {
+            args.add("--strict-mcp-config")
+        }
         
+        // Add end-of-options delimiter to prevent variadic options (like --mcp-config) from consuming the prompt
+        args.add("--")
         // Add prompt last (as a positional argument)
         args.add(options.prompt)
         

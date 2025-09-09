@@ -26,7 +26,9 @@ class SessionPersistence : PersistentStateComponent<SessionPersistence.State> {
         var openTabs: MutableList<TabInfo> = mutableListOf(),
         // New: logical sessions that group multiple CLI session IDs
         var logicalSessions: MutableList<LogicalSession> = mutableListOf(),
-        var lastLogicalSessionId: String? = null
+        var lastLogicalSessionId: String? = null,
+        // key: logicalSessionId -> selected MCP server names
+        var mcpSelections: MutableMap<String, MutableList<String>> = mutableMapOf()
     )
     
     data class TabInfo(
@@ -141,4 +143,13 @@ class SessionPersistence : PersistentStateComponent<SessionPersistence.State> {
     }
 
     fun getLogicalSession(logicalId: String): LogicalSession? = myState.logicalSessions.find { it.id == logicalId }
+
+    // --- MCP selections ---
+    fun getSelectedMcpServers(logicalId: String): List<String> {
+        return myState.mcpSelections[logicalId]?.toList() ?: emptyList()
+    }
+
+    fun setSelectedMcpServers(logicalId: String, servers: List<String>) {
+        myState.mcpSelections[logicalId] = servers.distinct().toMutableList()
+    }
 }
