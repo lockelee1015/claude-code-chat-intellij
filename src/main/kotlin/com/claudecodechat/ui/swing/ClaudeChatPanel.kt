@@ -671,8 +671,11 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                 border = JBUI.Borders.empty()
             }
 
-            val (ctx, stripped) = extractIdeContext(content)
-            val contentArea = createWrappingContentArea(stripped, textColor)
+            val (ctx, noCtx) = extractIdeContext(content)
+            val (attachments, body) = extractAttachments(noCtx)
+            val prepared = injectImageLinks(body, attachments)
+            val contentArea = createWrappingContentArea(prepared, textColor)
+            wireImageLinks(contentArea)
             try { contentArea.alignmentX = LEFT_ALIGNMENT } catch (_: Exception) {}
             right.add(contentArea)
             if (ctx != null) {
@@ -1526,6 +1529,85 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
             } catch (_: Exception) {}
             add(component, BorderLayout.CENTER)
         }
+    }
+
+    /**
+     * Extract <attachments>…</attachments> as id->path mapping and strip it from content.
+     */
+    private fun extractAttachments(content: String): Pair<Map<String, String>, String> {
+        val map = mutableMapOf<String, String>()
+        val regex = Regex("(?s)<attachments>.*?</attachments>", RegexOption.IGNORE_CASE)
+        val m = regex.find(content)
+        if (m != null) {
+            val block = content.substring(m.range.first, m.range.last + 1)
+            val imgRe = Regex("<image\\s+([^>]*)/>", RegexOption.IGNORE_CASE)
+            imgRe.findAll(block).forEach { match ->
+                val attrs = match.groupValues.getOrNull(1) ?: ""
+                fun attr(name: String): String? {
+                    val am = Regex("""$name="([^"]*)"""", RegexOption.IGNORE_CASE).find(attrs)
+                    return am?.groupValues?.getOrNull(1)
+                }
+                val id = attr("id")?.trim()
+                val path = attr("path")?.trim()
+                if (!id.isNullOrBlank() && !path.isNullOrBlank()) {
+                    val norm = id.removePrefix("#").let { if (it.startsWith("image", ignoreCase = true)) it.substring(5) else it }
+                    map[norm] = path
+                }
+            }
+            val stripped = content.removeRange(m.range).trim()
+            return map to stripped
+        }
+        return emptyMap<String, String>() to content
+    }
+
+    /**
+     * Replace [#imageN] with markdown links pointing to ide-image:<encodedPath> so they are clickable.
+     */
+    private fun injectImageLinks(content: String, attachments: Map<String, String>): String {
+        if (attachments.isEmpty()) return content
+        var result = content
+        val re = Regex("\\[(#image(\\d+))]", RegexOption.IGNORE_CASE)
+        result = re.replace(result) { m ->
+            val id = m.groupValues.getOrNull(2)
+            val full = m.groupValues.getOrNull(1) ?: ""
+            val path = if (id != null) attachments[id] else null
+            if (path != null) {
+                val enc = try { java.net.URLEncoder.encode(path, Charsets.UTF_8.name()) } catch (_: Exception) { path }
+                "[$full](ide-image:$enc)"
+            } else m.value
+        }
+        return result
+    }
+
+    /**
+     * Find the embedded HTML editor and add hyperlink handler for ide-image links.
+     */
+    private fun wireImageLinks(container: JPanel) {
+        try {
+            val inner = container.components.firstOrNull() as? JPanel ?: return
+            val editor = inner.getClientProperty("htmlEditor") as? javax.swing.JEditorPane
+                ?: inner.components.firstOrNull { it is javax.swing.JEditorPane } as? javax.swing.JEditorPane
+                ?: return
+            editor.addHyperlinkListener { e ->
+                if (e.eventType != javax.swing.event.HyperlinkEvent.EventType.ACTIVATED) return@addHyperlinkListener
+                val desc = e.description ?: e.url?.toString() ?: return@addHyperlinkListener
+                if (desc.startsWith("ide-image:")) {
+                    val enc = desc.removePrefix("ide-image:")
+                    val path = try { java.net.URLDecoder.decode(enc, Charsets.UTF_8.name()) } catch (_: Exception) { enc }
+                    openImagePath(path)
+                }
+            }
+        } catch (_: Exception) { }
+    }
+
+    private fun openImagePath(path: String) {
+        try {
+            val io = java.io.File(path)
+            val vf = com.intellij.openapi.vfs.LocalFileSystem.getInstance().refreshAndFindFileByIoFile(io)
+            if (vf != null) {
+                com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project).openFile(vf, true)
+            }
+        } catch (_: Exception) { }
     }
     
     /**

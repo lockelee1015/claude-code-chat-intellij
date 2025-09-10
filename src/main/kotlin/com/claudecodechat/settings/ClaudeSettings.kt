@@ -22,6 +22,8 @@ class ClaudeSettings : PersistentStateComponent<ClaudeSettings> {
     var syncWithEditorFont: Boolean = false  // Sync markdown fonts with editor fonts
     var markdownLineSpacing: Float = 1.4f  // Line spacing multiplier for markdown content
     var chatInputSplitterProportion: Float = 0.80f  // Splitter proportion for messages vs input
+    // Image input mode: "path" (attachments + @ref) or "base64" (stream-json stdin)
+    var imageInputMode: String = "path"
     
     companion object {
         fun getInstance(): ClaudeSettings {

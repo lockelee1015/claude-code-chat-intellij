@@ -39,7 +39,8 @@ class ClaudeSettingsConfigurable : Configurable {
                 component.showCodeBlockLineNumbers != settings.showCodeBlockLineNumbers ||
                 component.maxCodeBlockHeight != settings.maxCodeBlockHeight ||
                 component.syncWithEditorFont != settings.syncWithEditorFont ||
-                component.markdownLineSpacing != settings.markdownLineSpacing
+                component.markdownLineSpacing != settings.markdownLineSpacing ||
+                component.imageInputMode != settings.imageInputMode
     }
     
     override fun apply() {
@@ -56,6 +57,7 @@ class ClaudeSettingsConfigurable : Configurable {
         settings.maxCodeBlockHeight = component.maxCodeBlockHeight
         settings.syncWithEditorFont = component.syncWithEditorFont
         settings.markdownLineSpacing = component.markdownLineSpacing
+        settings.imageInputMode = component.imageInputMode
     }
     
     override fun reset() {
@@ -72,6 +74,7 @@ class ClaudeSettingsConfigurable : Configurable {
         component.maxCodeBlockHeight = settings.maxCodeBlockHeight
         component.syncWithEditorFont = settings.syncWithEditorFont
         component.markdownLineSpacing = settings.markdownLineSpacing
+        component.imageInputMode = settings.imageInputMode
     }
     
     override fun disposeUIResources() {
@@ -84,12 +87,27 @@ class ClaudeSettingsConfigurable : Configurable {
         private val environmentVariablesArea = JBTextArea(5, 40)
         private val markdownFontSizeSpinner = JBIntSpinner(10, 8, 24)
         private val debugModeCheckBox = JBCheckBox("Enable debug mode (show tool IDs and debug info)")
+        private val debugModeNote = JBLabel(
+            """
+            <html>
+              <span style='color:#888888;'>
+                When enabled, each CLI request is logged under <code>~/.claude-code-chat/requests/</code>.<br/>
+                Files include a <code>.cmd</code> with the working directory and full arguments, and a <code>.stdin.json</code>
+                with the stream-json payload (if used). These files may contain sensitive data; clean up manually as needed.
+              </span>
+            </html>
+            """.trimIndent()
+        )
         private val maxMessagesSpinner = JBIntSpinner(100, 10, 1000)
         private val enhancedCodeBlocksCheckBox = JBCheckBox("Use IntelliJ editor for code blocks (with syntax highlighting)")
         private val showLineNumbersCheckBox = JBCheckBox("Show line numbers in code blocks")
         private val maxCodeBlockHeightSpinner = JBIntSpinner(300, 100, 800)
         private val syncWithEditorFontCheckBox = JBCheckBox("Sync markdown fonts with editor fonts")
         private val markdownLineSpacingSpinner = JSpinner(SpinnerNumberModel(1.4, 1.0, 2.5, 0.1))
+        private val imageInputModeCombo = javax.swing.JComboBox(arrayOf(
+            "path (@file references)",
+            "base64 (stream-json stdin)"
+        ))
         
         init {
             panel = FormBuilder.createFormBuilder()
@@ -120,6 +138,7 @@ class ClaudeSettingsConfigurable : Configurable {
                     false
                 )
                 .addComponent(debugModeCheckBox, 1)
+                .addComponent(debugModeNote, 1)
                 .addSeparator(2)
                 .addComponent(JBLabel("Code Block Display Options:"), 1)
                 .addComponent(enhancedCodeBlocksCheckBox, 1)
@@ -134,6 +153,13 @@ class ClaudeSettingsConfigurable : Configurable {
                 .addLabeledComponent(
                     JBLabel("Markdown Line Spacing (1.0-2.5):"),
                     markdownLineSpacingSpinner,
+                    1,
+                    false
+                )
+                .addSeparator(2)
+                .addLabeledComponent(
+                    JBLabel("Image Input Mode:"),
+                    imageInputModeCombo,
                     1,
                     false
                 )
@@ -199,6 +225,12 @@ class ClaudeSettingsConfigurable : Configurable {
             get() = (markdownLineSpacingSpinner.value as Number).toFloat()
             set(value) {
                 markdownLineSpacingSpinner.value = value
+            }
+
+        var imageInputMode: String
+            get() = if (imageInputModeCombo.selectedIndex == 1) "base64" else "path"
+            set(value) {
+                imageInputModeCombo.selectedIndex = if (value == "base64") 1 else 0
             }
     }
 }

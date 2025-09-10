@@ -10,6 +10,7 @@ import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBPanel
 import com.intellij.ui.components.JBScrollPane
@@ -33,11 +34,21 @@ import com.intellij.openapi.util.TextRange
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.ui.popup.JBPopupFactory
+import com.intellij.openapi.diagnostic.Logger
 import kotlinx.coroutines.*
 import com.claudecodechat.persistence.SessionPersistence
 import java.awt.*
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
+import java.awt.datatransfer.Transferable
+import java.awt.datatransfer.DataFlavor
+import java.awt.image.BufferedImage
+import java.io.File
+import java.io.IOException
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import java.util.UUID
+import javax.imageio.ImageIO
 import javax.swing.*
 
 /**
@@ -49,31 +60,53 @@ class ChatInputBar(
     private val onSend: (text: String, model: String, planMode: Boolean) -> Unit,
     private val onStop: (() -> Unit)? = null
 ) : JBPanel<ChatInputBar>(BorderLayout()) {
+    private val log = Logger.getInstance(ChatInputBar::class.java)
     companion object {
         private const val TEMP_DIR_NAME = "claude-chat-input"
         private const val RETENTION_MS: Long = 48L * 60 * 60 * 1000 // 48 hours
+        private const val IMAGES_DIR_NAME = "claude-chat-images"
         private val cleanupRunning = java.util.concurrent.atomic.AtomicBoolean(false)
+        private val dateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
 
         private fun scheduleAsyncTempCleanup() {
             if (cleanupRunning.compareAndSet(false, true)) {
                 try {
                     com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread {
                         try {
-                            val tmpRoot = java.io.File(System.getProperty("java.io.tmpdir"), TEMP_DIR_NAME)
-                            if (tmpRoot.exists()) {
-                                val now = System.currentTimeMillis()
-                                tmpRoot.listFiles { f -> f.isFile && f.name.startsWith("chat-input-") && f.name.endsWith(".md") }?.forEach { f ->
-                                    if (now - f.lastModified() > RETENTION_MS) {
-                                        runCatching { f.delete() }
-                                    }
-                                }
-                            }
+                            // Clean up both tmp directory (for backward compatibility) and project .idea directory
+                            cleanupTempFiles(java.io.File(System.getProperty("java.io.tmpdir"), TEMP_DIR_NAME))
+                            // Project-specific cleanup will be handled per project in createInputEditor
                         } finally {
                             cleanupRunning.set(false)
                         }
                     }
                 } catch (_: Exception) {
                     cleanupRunning.set(false)
+                }
+            }
+        }
+        
+        private fun cleanupTempFiles(tempDir: java.io.File) {
+            if (tempDir.exists()) {
+                val now = System.currentTimeMillis()
+                // Clean up chat input temp files
+                tempDir.listFiles { f -> f.isFile && f.name.startsWith("chat-input-") && f.name.endsWith(".md") }?.forEach { f ->
+                    if (now - f.lastModified() > RETENTION_MS) {
+                        runCatching { f.delete() }
+                    }
+                }
+                // Clean up old image files in the images subdirectory
+                val imagesDir = java.io.File(tempDir, IMAGES_DIR_NAME)
+                if (imagesDir.exists()) {
+                    imagesDir.listFiles { f -> f.isFile && f.name.endsWith(".png") }?.forEach { f ->
+                        if (now - f.lastModified() > RETENTION_MS) {
+                            runCatching { f.delete() }
+                        }
+                    }
+                    // Remove empty images directory
+                    if (imagesDir.listFiles()?.isEmpty() == true) {
+                        runCatching { imagesDir.delete() }
+                    }
                 }
             }
         }
@@ -147,6 +180,9 @@ class ChatInputBar(
 
         // Setup status bar
         setupStatusBar()
+        
+        // Install image paste handler
+        installImagePasteHandler()
 
         // Layout - Use Editor component
         val inputScroll = JBScrollPane(inputEditor.component).apply {
@@ -244,13 +280,18 @@ class ChatInputBar(
      * Create IntelliJ Editor for chat input with PSI support using a unique temp file per tab
      */
     private fun createInputEditor(): Pair<Editor, Document> {
-        // Create a unique temp file under system tmp to avoid polluting the project
-        val tmpRoot = java.io.File(System.getProperty("java.io.tmpdir"), TEMP_DIR_NAME)
-        if (!tmpRoot.exists()) tmpRoot.mkdirs()
-        // Schedule opportunistic async cleanup (non-blocking)
-        scheduleAsyncTempCleanup()
-        val chatInputFile = java.io.File.createTempFile("chat-input-", ".md", tmpRoot).apply {
-            deleteOnExit()
+        // Create temp file under project .idea directory to avoid polluting system tmp
+        val ideaDir = java.io.File(project.basePath, ".idea")
+        if (!ideaDir.exists()) ideaDir.mkdirs()
+        
+        val tempDir = java.io.File(ideaDir, TEMP_DIR_NAME)
+        if (!tempDir.exists()) tempDir.mkdirs()
+        
+        // Clean up old files in this project's temp directory
+        cleanupTempFiles(tempDir)
+        
+        val chatInputFile = java.io.File.createTempFile("chat-input-", ".md", tempDir).apply {
+            // Don't use deleteOnExit() as we manage cleanup ourselves
         }
         inputIoFile = chatInputFile
 
@@ -379,7 +420,7 @@ class ChatInputBar(
             override fun mouseMoved(e: EditorMouseEvent) {
                 if (e.editor !== editor) return
                 val offset = offsetAt(e)
-                val hovering = linkRanges.any { it.containsOffset(offset) }
+                val hovering = linkRanges.any { it.containsOffsetInText(offset) }
                 editor.contentComponent.cursor = if (hovering) Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) else Cursor.getDefaultCursor()
             }
         }
@@ -393,7 +434,7 @@ class ChatInputBar(
                 val modifierDown = me.isMetaDown || me.isControlDown
                 if (!modifierDown) return
                 val offset = offsetAt(e)
-                val link = linkRanges.firstOrNull { it.containsOffset(offset) } ?: return
+                val link = linkRanges.firstOrNull { it.containsOffsetInText(offset) } ?: return
                 val token = inputDocument.getText(link).removePrefix("@")
                 openFileToken(token)
                 me.consume()
@@ -402,7 +443,7 @@ class ChatInputBar(
         EditorFactory.getInstance().eventMulticaster.addEditorMouseListener(clickListener, project)
     }
 
-    private fun TextRange.containsOffset(offset: Int): Boolean = offset in startOffset until endOffset
+    private fun TextRange.containsOffsetInText(offset: Int): Boolean = offset in startOffset until endOffset
 
     private fun offsetAt(e: EditorMouseEvent): Int {
         val p = e.mouseEvent.point
@@ -449,7 +490,11 @@ class ChatInputBar(
         val vfs: List<VirtualFile> = if (token.contains('/')) {
             val base = project.basePath
             if (base != null) {
-                val io = java.io.File(base, token)
+                val io = if (token.startsWith("$IMAGES_DIR_NAME/")) {
+                    java.io.File(base, ".idea/${IMAGES_DIR_NAME}/" + token.removePrefix("$IMAGES_DIR_NAME/"))
+                } else {
+                    java.io.File(base, token)
+                }
                 LocalFileSystem.getInstance().findFileByIoFile(io)?.let { listOf(it) } ?: emptyList()
             } else emptyList()
         } else {
@@ -691,23 +736,104 @@ class ChatInputBar(
     fun isPlanModeEnabled(): Boolean = planModeCheckBox.isSelected
 
     private fun sendMessage() {
-        val text = inputDocument.text.trim()
-        if (text.isEmpty()) return
+        val rawText = inputDocument.text.trim()
+        if (rawText.isEmpty()) return
         val model = (modelComboBox.selectedItem as? String) ?: "auto"
         
         // Do not add IDE context for slash commands
-        val isSlash = text.trimStart().startsWith("/")
+        val isSlash = rawText.trimStart().startsWith("/")
         val ideContext = if (!isSlash) buildIdeContextXml() else null
-        val finalText = if (ideContext != null) "$text\n\n$ideContext" else text
+
+        // Transform pasted image references into [#imageN] + attachments xml
+        val (textWithImageIds, attachmentsXml) = if (!isSlash) transformImageReferences(rawText) else rawText to null
+
+        // Assemble final text: user text [+ ide_context] [+ attachments]
+        val finalText = buildString {
+            append(textWithImageIds)
+            if (!attachmentsXml.isNullOrBlank()) {
+                append("\n\n")
+                append(attachmentsXml)
+            }
+            if (ideContext != null) {
+                append("\n\n")
+                append(ideContext)
+            }
+        }
         
         // Show loading state
-        showLoading(text)
+        showLoading(rawText)
         
         // Clear input in write action
         ApplicationManager.getApplication().runWriteAction {
             inputDocument.setText("")
         }
         onSend(finalText, model, planModeCheckBox.isSelected)
+    }
+
+    /**
+     * Replace @claude-chat-images/... in text with [#imageN] and build an attachments XML block.
+     */
+    private fun transformImageReferences(text: String): Pair<String, String?> {
+        return try {
+            // Match @claude-chat-images/<filename>
+            val pattern = Regex("@" + Regex.escape(IMAGES_DIR_NAME) + "/[\\w./-]+")
+            val matches = pattern.findAll(text).toList()
+            if (matches.isEmpty()) return text to null
+
+            // Preserve first-appearance order and de-duplicate
+            val ordered = LinkedHashSet<String>()
+            matches.forEach { ordered.add(it.value) }
+
+            // Build id mapping: [#image1], [#image2], ...
+            val idByRef = mutableMapOf<String, String>()
+            var idx = 1
+            ordered.forEach { ref ->
+                idByRef[ref] = "#image$idx"
+                idx++
+            }
+
+            if (com.claudecodechat.settings.ClaudeSettings.getInstance().debugMode) {
+                log.info("Image refs found in prompt: ${ordered.joinToString()}")
+            }
+
+            // Replace in text
+            var newText = text
+            ordered.forEach { ref ->
+                val idToken = "[${idByRef[ref]}]"
+                newText = newText.replace(ref, idToken)
+            }
+
+            // Build XML attachments
+            val abs = ordered.mapNotNull { ref -> imageRefToAbsolutePath(ref) }
+            val ids = ordered.map { idByRef[it] ?: "" }
+            val attachments = buildImageAttachmentsXml(abs, ids)
+            if (com.claudecodechat.settings.ClaudeSettings.getInstance().debugMode) {
+                log.info("Built attachments XML: ${attachments ?: "<none>"}")
+            }
+            if (attachments == null) text to null else newText to attachments
+        } catch (_: Exception) {
+            text to null
+        }
+    }
+
+    private fun imageRefToAbsolutePath(ref: String): String? {
+        // ref like: @claude-chat-images/filename.png
+        val base = project.basePath ?: return null
+        val fileName = ref.substringAfter("$IMAGES_DIR_NAME/").takeIf { it.isNotBlank() } ?: return null
+        return try {
+            java.nio.file.Paths.get(base, ".idea", IMAGES_DIR_NAME, fileName).toFile().absolutePath
+        } catch (_: Exception) { null }
+    }
+
+    private fun buildImageAttachmentsXml(absPaths: List<String>, ids: List<String>): String? {
+        if (absPaths.isEmpty() || absPaths.size != ids.size) return null
+        val items = absPaths.zip(ids)
+        val body = items.joinToString("") { (path, id) ->
+            val p = xmlEscape(path)
+            val i = xmlEscape(id)
+            "<image id=\"$i\" path=\"$p\"/>"
+        }
+        return "<attachments>$body</attachments>"
     }
 
     private fun buildIdeContextXml(): String? {
@@ -751,6 +877,178 @@ class ChatInputBar(
         .replace("\"", "&quot;")
 
 
+
+    /**
+     * Install image paste handler
+     */
+    private fun installImagePasteHandler() {
+        // For IntelliJ Editor, we need to handle paste at the editor level
+        // Set transfer handler on the editor's content component
+        inputEditor.contentComponent.transferHandler = object : javax.swing.TransferHandler() {
+            override fun importData(comp: JComponent, t: Transferable): Boolean {
+                try {
+                    debugLogFlavors("TransferHandler.importData", t)
+                    extractImageFromTransferable(t)?.let { bi ->
+                        handlePastedImage(bi)
+                        return true
+                    }
+                } catch (e: Exception) {
+                    // Log error but don't show to user
+                    log.warn("Failed to handle image paste (TransferHandler)", e)
+                }
+                return false
+            }
+            
+            override fun canImport(comp: JComponent, transferFlavors: Array<out DataFlavor>): Boolean {
+                return transferFlavors.any { it == DataFlavor.imageFlavor || it == DataFlavor.javaFileListFlavor || it.primaryType == "image" }
+            }
+        }
+        
+        // Register global paste wrapper for this editor
+        ChatPasteImageManager.registerEditor(inputEditor) {
+            val contents = CopyPasteManager.getInstance().contents ?: return@registerEditor false
+            debugLogFlavors("PasteWrapper", contents)
+            extractImageFromTransferable(contents)?.let { img ->
+                handlePastedImage(img)
+                return@registerEditor true
+            }
+            false
+        }
+    }
+    
+    /**
+     * Handle pasted image - save to file and insert @ reference
+     */
+    private fun handlePastedImage(image: BufferedImage) {
+        try {
+            // Create images directory in .idea folder to keep it hidden from users
+            val ideaDir = File(project.basePath, ".idea")
+            if (!ideaDir.exists()) ideaDir.mkdirs()
+            
+            val imagesDir = File(ideaDir, IMAGES_DIR_NAME)
+            if (!imagesDir.exists()) {
+                imagesDir.mkdirs()
+            }
+            
+            // Generate unique filename
+            val timestamp = LocalDateTime.now().format(dateTimeFormatter)
+            val uuid = UUID.randomUUID().toString().substring(0, 8)
+            val fileName = "screenshot-$timestamp-$uuid.png"
+            val imageFile = File(imagesDir, fileName)
+            
+            // Save image to file
+            ImageIO.write(image, "png", imageFile)
+            
+            // Insert @ reference at current caret position
+            val reference = "@$IMAGES_DIR_NAME/$fileName"
+            ApplicationManager.getApplication().runWriteAction {
+                val currentText = inputDocument.text
+                val caretOffset = inputEditor.caretModel.offset
+                
+                // Insert space before if not at beginning and not already preceded by space
+                val prefix = if (caretOffset > 0 && currentText.getOrNull(caretOffset - 1) != ' ' && currentText.getOrNull(caretOffset - 1) != '\n') {
+                    " "
+                } else {
+                    ""
+                }
+                
+                // Insert space after if not at end and not already followed by space
+                val suffix = if (caretOffset < currentText.length && currentText.getOrNull(caretOffset) != ' ' && currentText.getOrNull(caretOffset) != '\n') {
+                    " "
+                } else {
+                    ""
+                }
+                
+                val newText = currentText.substring(0, caretOffset) + prefix + reference + suffix + currentText.substring(caretOffset)
+                inputDocument.setText(newText)
+                
+                // Move caret to after the inserted reference
+                inputEditor.caretModel.moveToOffset(caretOffset + prefix.length + reference.length)
+            }
+            
+            // Update status to show image was saved
+            updateContextInfo("Image saved: $fileName")
+            if (com.claudecodechat.settings.ClaudeSettings.getInstance().debugMode) {
+                log.info("Pasted image saved to: ${imageFile.absolutePath}")
+            }
+            
+        } catch (e: IOException) {
+            // Handle file I/O errors silently
+        } catch (e: Exception) {
+            // Handle other errors silently
+        }
+    }
+
+    private fun isImageFile(f: File): Boolean {
+        val name = f.name.lowercase()
+        return name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg") ||
+                name.endsWith(".gif") || name.endsWith(".bmp") || name.endsWith(".webp")
+    }
+
+    private fun toBufferedImage(img: Image): BufferedImage {
+        if (img is BufferedImage) return img
+        val w = img.getWidth(null)
+        val h = img.getHeight(null)
+        val b = BufferedImage(if (w > 0) w else 1, if (h > 0) h else 1, BufferedImage.TYPE_INT_ARGB)
+        val g2 = b.createGraphics()
+        g2.drawImage(img, 0, 0, null)
+        g2.dispose()
+        return b
+    }
+
+    private fun extractImageFromTransferable(t: Transferable): BufferedImage? {
+        // 1) Direct java image
+        runCatching {
+            if (t.isDataFlavorSupported(DataFlavor.imageFlavor)) {
+                (t.getTransferData(DataFlavor.imageFlavor) as? Image)?.let { return toBufferedImage(it) }
+            }
+        }
+        // 2) File list
+        runCatching {
+            if (t.isDataFlavorSupported(DataFlavor.javaFileListFlavor)) {
+                @Suppress("UNCHECKED_CAST")
+                val files = t.getTransferData(DataFlavor.javaFileListFlavor) as? List<File>
+                val f = files?.firstOrNull { isImageFile(it) }
+                if (f != null) return ImageIO.read(f)
+            }
+        }
+        // 3) Any image/* flavor to InputStream/byte[]/Image
+        for (flavor in t.transferDataFlavors) {
+            runCatching {
+                val mt = flavor.mimeType.lowercase()
+                if (flavor.primaryType == "image" || mt.startsWith("image/")) {
+                    val data = t.getTransferData(flavor)
+                    when (data) {
+                        is Image -> return toBufferedImage(data)
+                        is java.io.InputStream -> return ImageIO.read(data)
+                        is ByteArray -> return ImageIO.read(java.io.ByteArrayInputStream(data))
+                    }
+                }
+            }
+        }
+        // 4) URI list with file://
+        runCatching {
+            val uriFlavor = DataFlavor("text/uri-list;class=java.lang.String")
+            if (t.isDataFlavorSupported(uriFlavor)) {
+                val s = t.getTransferData(uriFlavor) as? String
+                val uri = s?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()
+                if (uri != null && uri.startsWith("file:")) {
+                    val file = java.nio.file.Paths.get(java.net.URI(uri)).toFile()
+                    if (isImageFile(file)) return ImageIO.read(file)
+                }
+            }
+        }
+        return null
+    }
+
+    private fun debugLogFlavors(source: String, t: Transferable) {
+        if (!com.claudecodechat.settings.ClaudeSettings.getInstance().debugMode) return
+        val flavors = t.transferDataFlavors.joinToString { f ->
+            val cl = f.representationClass?.name ?: "?"
+            "${f.primaryType}/${f.subType} as $cl"
+        }
+        log.info("[$source] clipboard flavors: $flavors")
+    }
 
     private fun setupFileInfoTracking() {
         currentFileLabel.font = Font(Font.SANS_SERIF, Font.PLAIN, 11)
@@ -877,6 +1175,7 @@ class ChatInputBar(
         scope.cancel()
         // Unregister from global manager
         try { ChatEnterToSendManager.unregisterEditor(inputEditor) } catch (_: Exception) { }
+        try { ChatPasteImageManager.unregisterEditor(inputEditor) } catch (_: Exception) { }
         // Unregister Shift+Enter shortcut
         try {
             shiftEnterAction?.unregisterCustomShortcutSet(inputEditor.contentComponent)

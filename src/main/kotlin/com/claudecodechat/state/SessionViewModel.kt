@@ -194,8 +194,9 @@ class SessionViewModel(private val project: Project) : Disposable {
                 logger.info("Sending prompt with session management: sessionId=$currentSessionId, resume=${currentSessionId != null}")
                 
                 val mcpConfig = buildMcpConfigForCurrentSession()
+                val built = buildPromptOrJson(prompt)
                 val options = ClaudeCliService.ExecuteOptions(
-                    prompt = prompt,
+                    prompt = built.prompt,
                     model = model,
                     sessionId = currentSessionId,
                     resume = false, // 不再使用这个参数，CLI逻辑会自动处理
@@ -203,7 +204,9 @@ class SessionViewModel(private val project: Project) : Disposable {
                     verbose = true,
                     skipPermissions = true,
                     permissionMode = if (planMode) "plan" else null,
-                    mcpConfigJson = mcpConfig
+                    mcpConfigJson = mcpConfig,
+                    stdinPayload = built.stdinPayload,
+                    inputFormat = built.inputFormat
                 )
                 
                 // Execute Claude Code CLI with callback
@@ -231,6 +234,80 @@ class SessionViewModel(private val project: Project) : Disposable {
         }.apply {
             name = "Claude-Send-Thread"
             start()
+        }
+    }
+
+    private data class BuiltInput(
+        val prompt: String,
+        val stdinPayload: String? = null,
+        val inputFormat: String? = null,
+    )
+
+    private fun buildPromptOrJson(original: String): BuiltInput {
+        return try {
+            val settings = com.claudecodechat.settings.ClaudeSettings.getInstance()
+            if (settings.imageInputMode == "base64") {
+                val (attachments, body) = extractAttachments(original)
+                if (attachments.isEmpty()) {
+                    BuiltInput(prompt = original)
+                } else {
+                    val contentJson = StringBuilder()
+                    // images first
+                    attachments.forEach { (_, path) ->
+                        val f = java.io.File(path)
+                        val media = mediaTypeFor(f.name)
+                        val b64 = java.util.Base64.getEncoder().encodeToString(f.readBytes())
+                        if (contentJson.isNotEmpty()) contentJson.append(',')
+                        contentJson.append("{" +
+                                "\"type\":\"image\",\"source\":{\"type\":\"base64\",\"media_type\":\"$media\",\"data\":\"$b64\"}}")
+                    }
+                    // then text
+                    if (contentJson.isNotEmpty()) contentJson.append(',')
+                    val textEsc = body.replace("\\", "\\\\").replace("\"", "\\\"")
+                    contentJson.append("{\"type\":\"text\",\"text\":\"$textEsc\"}")
+                    val payload = "{" +
+                            "\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[" + contentJson.toString() + "]}}"
+                    BuiltInput(prompt = "", stdinPayload = payload, inputFormat = "stream-json")
+                }
+            } else BuiltInput(prompt = original)
+        } catch (e: Exception) {
+            logger.warn("Failed to build base64 json input, falling back to prompt", e)
+            BuiltInput(prompt = original)
+        }
+    }
+
+    private fun extractAttachments(content: String): Pair<List<Pair<String, String>>, String> {
+        val regex = Regex("(?s)<attachments>.*?</attachments>", RegexOption.IGNORE_CASE)
+        val m = regex.find(content)
+        if (m != null) {
+            val block = content.substring(m.range.first, m.range.last + 1)
+            val imgRe = Regex("<image\\s+([^>]*)/>", RegexOption.IGNORE_CASE)
+            val list = mutableListOf<Pair<String, String>>()
+            imgRe.findAll(block).forEach { match ->
+                val attrs = match.groupValues.getOrNull(1) ?: ""
+                fun attr(name: String): String? {
+                    val am = Regex("""$name=\"([^\"]*)\"""", RegexOption.IGNORE_CASE).find(attrs)
+                    return am?.groupValues?.getOrNull(1)
+                }
+                val id = attr("id")?.trim()?.removePrefix("#")
+                val path = attr("path")?.trim()
+                if (!id.isNullOrBlank() && !path.isNullOrBlank()) list.add(id to path)
+            }
+            val stripped = content.removeRange(m.range).trim()
+            return list to stripped
+        }
+        return emptyList<Pair<String, String>>() to content
+    }
+
+    private fun mediaTypeFor(name: String): String {
+        val lower = name.lowercase()
+        return when {
+            lower.endsWith(".png") -> "image/png"
+            lower.endsWith(".jpg") || lower.endsWith(".jpeg") -> "image/jpeg"
+            lower.endsWith(".gif") -> "image/gif"
+            lower.endsWith(".webp") -> "image/webp"
+            lower.endsWith(".bmp") -> "image/bmp"
+            else -> "application/octet-stream"
         }
     }
 

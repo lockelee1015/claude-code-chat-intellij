@@ -53,7 +53,10 @@ class ClaudeCliService(private val project: Project) {
         val permissionMode: String? = null,
         val mcpConfigJson: String? = null,
         val strictMcp: Boolean = false,
-        val customArgs: List<String> = emptyList()
+        val customArgs: List<String> = emptyList(),
+        // Optional stdin payload with input format; when set, we will not pass prompt as argv
+        val stdinPayload: String? = null,
+        val inputFormat: String? = null
     )
     
     
@@ -78,6 +81,11 @@ class ClaudeCliService(private val project: Project) {
         logger.info("  Binary: $claudeBinary")
         logger.info("  Args: $args")
         logger.info("  Working directory: $projectPath")
+
+        // Debug: persist each request to a dedicated home dir for troubleshooting
+        if (ClaudeSettings.getInstance().debugMode) {
+            persistDebugRequest(claudeBinary, args, projectPath, options.stdinPayload)
+        }
         
         try {
             val command = mutableListOf(claudeBinary)
@@ -138,12 +146,25 @@ class ClaudeCliService(private val project: Project) {
             logger.info("Process started successfully with PID: ${process.pid()}")
             logger.info("Process is alive: ${process.isAlive}")
             
-            // Close stdin immediately since we don't need it
-            try {
-                process.outputStream.close()
-                logger.info("Closed process stdin")
-            } catch (e: Exception) {
-                logger.warn("Error closing stdin: ${e.message}")
+            // Write stdin payload if provided; otherwise close stdin
+            if (options.stdinPayload != null) {
+                try {
+                    logger.info("Writing stdin payload (${options.stdinPayload.length} chars)")
+                    process.outputStream.bufferedWriter().use { w ->
+                        w.write(options.stdinPayload)
+                        w.flush()
+                    }
+                    logger.info("Stdin payload written")
+                } catch (e: Exception) {
+                    logger.error("Error writing stdin payload", e)
+                }
+            } else {
+                try {
+                    process.outputStream.close()
+                    logger.info("Closed process stdin")
+                } catch (e: Exception) {
+                    logger.warn("Error closing stdin: ${e.message}")
+                }
             }
             
             // Read stdout in a separate thread with buffering disabled
@@ -271,6 +292,54 @@ class ClaudeCliService(private val project: Project) {
             ))
         }
     }
+
+    /**
+     * When debug mode is enabled, persist each outgoing CLI request to files under
+     * ~/.claude-code-chat/requests: one .cmd file (cwd + command) and, if present,
+     * one .stdin.json containing the raw stdin payload. Filenames are timestamped.
+     */
+    private fun persistDebugRequest(binary: String, args: List<String>, cwd: String, stdinPayload: String?) {
+        try {
+            val home = System.getProperty("user.home") ?: return
+            val dir = File(home, ".claude-code-chat/requests")
+            if (!dir.exists()) dir.mkdirs()
+            val ts = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS"))
+            val id = java.util.UUID.randomUUID().toString().substring(0, 8)
+            val base = File(dir, "request-$ts-$id")
+
+            // Write command file
+            val cmdFile = File(base.path + ".cmd")
+            val cmdLine = buildString {
+                appendLine("time: $ts")
+                appendLine("cwd: $cwd")
+                append("cmd: ")
+                append(escapeArg(binary))
+                for (a in args) {
+                    append(' ')
+                    append(escapeArg(a))
+                }
+                appendLine()
+                if (stdinPayload != null) {
+                    appendLine("stdin-bytes: ${stdinPayload.toByteArray().size}")
+                }
+            }
+            cmdFile.writeText(cmdLine)
+
+            // Write stdin payload if present
+            if (stdinPayload != null) {
+                val stdinFile = File(base.path + ".stdin.json")
+                stdinFile.writeText(stdinPayload)
+            }
+        } catch (e: Exception) {
+            logger.warn("Failed to persist debug request", e)
+        }
+    }
+
+    private fun escapeArg(s: String): String {
+        return if (s.any { it.isWhitespace() || it == '"' || it == '\'' }) {
+            '"' + s.replace("\\", "\\\\").replace("\"", "\\\"") + '"'
+        } else s
+    }
     
     /**
      * Stop a running Claude process
@@ -369,10 +438,18 @@ class ClaudeCliService(private val project: Project) {
             args.add("--strict-mcp-config")
         }
         
-        // Add end-of-options delimiter to prevent variadic options (like --mcp-config) from consuming the prompt
-        args.add("--")
-        // Add prompt last (as a positional argument)
-        args.add(options.prompt)
+        // Input format and prompt/stdin
+        if (options.stdinPayload != null) {
+            val fmt = options.inputFormat ?: DEFAULT_OUTPUT_FORMAT
+            args.add("--input-format")
+            args.add(fmt)
+            // Do not append prompt when using stdin payload
+        } else {
+            // Add end-of-options delimiter to prevent variadic options from consuming the prompt
+            args.add("--")
+            // Add prompt last (as a positional argument)
+            args.add(options.prompt)
+        }
         
         // Custom args
         args.addAll(options.customArgs)

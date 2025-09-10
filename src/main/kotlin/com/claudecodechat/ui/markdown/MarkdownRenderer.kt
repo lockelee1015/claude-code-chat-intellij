@@ -213,6 +213,8 @@ object MarkdownRenderer {
 
         return JPanel(BorderLayout()).apply {
             isOpaque = false
+            // expose the underlying editor for hyperlink wiring in callers
+            putClientProperty("htmlEditor", editor)
             add(editor, BorderLayout.CENTER)
         }
     }
@@ -224,4 +226,3 @@ object MarkdownRenderer {
         return "rgb($r,$g,$b)"
     }
 }
-
