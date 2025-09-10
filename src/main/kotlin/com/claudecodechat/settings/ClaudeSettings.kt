@@ -13,7 +13,7 @@ import com.intellij.util.xmlb.XmlSerializerUtil
 class ClaudeSettings : PersistentStateComponent<ClaudeSettings> {
     var claudePath: String = ""
     var environmentVariables: String = ""
-    var markdownFontSize: Int = 13  // Default markdown font size
+    var markdownFontSize: Int = 10  // Default markdown font size
     var debugMode: Boolean = false  // Debug mode for tool development
     var maxMessagesPerSession: Int = 100  // Maximum messages to display per session
     var useEnhancedCodeBlocks: Boolean = false  // Use IntelliJ editor for code block rendering

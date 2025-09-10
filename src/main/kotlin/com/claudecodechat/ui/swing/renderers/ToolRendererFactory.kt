@@ -32,7 +32,11 @@ object ToolRendererFactory {
         hasError: Boolean,
         toolId: String? = null
     ): javax.swing.JPanel {
-        val status = if (hasError) ToolStatus.ERROR else ToolStatus.SUCCESS
+        val status = when {
+            hasError -> ToolStatus.ERROR
+            toolOutput.isBlank() -> ToolStatus.IN_PROGRESS
+            else -> ToolStatus.SUCCESS
+        }
         val renderer = getRenderer(toolName)
         val cardRenderer = ToolCardRenderer()
         

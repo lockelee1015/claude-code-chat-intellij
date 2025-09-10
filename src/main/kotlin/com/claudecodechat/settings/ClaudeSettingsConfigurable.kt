@@ -82,7 +82,7 @@ class ClaudeSettingsConfigurable : Configurable {
         val panel: JPanel
         private val claudePathField = JBTextField()
         private val environmentVariablesArea = JBTextArea(5, 40)
-        private val markdownFontSizeSpinner = JBIntSpinner(11, 8, 24)
+        private val markdownFontSizeSpinner = JBIntSpinner(10, 8, 24)
         private val debugModeCheckBox = JBCheckBox("Enable debug mode (show tool IDs and debug info)")
         private val maxMessagesSpinner = JBIntSpinner(100, 10, 1000)
         private val enhancedCodeBlocksCheckBox = JBCheckBox("Use IntelliJ editor for code blocks (with syntax highlighting)")

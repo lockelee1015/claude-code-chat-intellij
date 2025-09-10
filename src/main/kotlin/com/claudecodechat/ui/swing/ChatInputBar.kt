@@ -49,6 +49,35 @@ class ChatInputBar(
     private val onSend: (text: String, model: String, planMode: Boolean) -> Unit,
     private val onStop: (() -> Unit)? = null
 ) : JBPanel<ChatInputBar>(BorderLayout()) {
+    companion object {
+        private const val TEMP_DIR_NAME = "claude-chat-input"
+        private const val RETENTION_MS: Long = 48L * 60 * 60 * 1000 // 48 hours
+        private val cleanupRunning = java.util.concurrent.atomic.AtomicBoolean(false)
+
+        private fun scheduleAsyncTempCleanup() {
+            if (cleanupRunning.compareAndSet(false, true)) {
+                try {
+                    com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread {
+                        try {
+                            val tmpRoot = java.io.File(System.getProperty("java.io.tmpdir"), TEMP_DIR_NAME)
+                            if (tmpRoot.exists()) {
+                                val now = System.currentTimeMillis()
+                                tmpRoot.listFiles { f -> f.isFile && f.name.startsWith("chat-input-") && f.name.endsWith(".md") }?.forEach { f ->
+                                    if (now - f.lastModified() > RETENTION_MS) {
+                                        runCatching { f.delete() }
+                                    }
+                                }
+                            }
+                        } finally {
+                            cleanupRunning.set(false)
+                        }
+                    }
+                } catch (_: Exception) {
+                    cleanupRunning.set(false)
+                }
+            }
+        }
+    }
 
     init {
     }
@@ -212,16 +241,17 @@ class ChatInputBar(
     }
     
     /**
-     * Create IntelliJ Editor for chat input with PSI support using a unique file per tab
+     * Create IntelliJ Editor for chat input with PSI support using a unique temp file per tab
      */
     private fun createInputEditor(): Pair<Editor, Document> {
-        // Create a unique real file for better PSI and completion support (per tab)
-        val projectBasePath = project.basePath ?: System.getProperty("user.home")
-        val chatInputDir = java.io.File(projectBasePath, ".chat-input")
-        if (!chatInputDir.exists()) chatInputDir.mkdirs()
-        val uniqueName = "chat-input-" + java.util.UUID.randomUUID().toString().substring(0, 8) + ".md"
-        val chatInputFile = java.io.File(chatInputDir, uniqueName)
-        if (!chatInputFile.exists()) chatInputFile.writeText("")
+        // Create a unique temp file under system tmp to avoid polluting the project
+        val tmpRoot = java.io.File(System.getProperty("java.io.tmpdir"), TEMP_DIR_NAME)
+        if (!tmpRoot.exists()) tmpRoot.mkdirs()
+        // Schedule opportunistic async cleanup (non-blocking)
+        scheduleAsyncTempCleanup()
+        val chatInputFile = java.io.File.createTempFile("chat-input-", ".md", tmpRoot).apply {
+            deleteOnExit()
+        }
         inputIoFile = chatInputFile
 
         // Get the virtual file from the actual file
@@ -665,8 +695,9 @@ class ChatInputBar(
         if (text.isEmpty()) return
         val model = (modelComboBox.selectedItem as? String) ?: "auto"
         
-        // Build IDE context XML and append after main content if available
-        val ideContext = buildIdeContextXml()
+        // Do not add IDE context for slash commands
+        val isSlash = text.trimStart().startsWith("/")
+        val ideContext = if (!isSlash) buildIdeContextXml() else null
         val finalText = if (ideContext != null) "$text\n\n$ideContext" else text
         
         // Show loading state

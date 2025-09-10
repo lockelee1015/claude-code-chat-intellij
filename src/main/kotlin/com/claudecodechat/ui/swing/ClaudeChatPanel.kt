@@ -41,6 +41,7 @@ import com.intellij.psi.search.FilenameIndex
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.ui.ColorUtil
+import com.claudecodechat.completion.SlashCommandRegistry
 
 class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>() {
     private val sessionViewModel = SessionViewModel.getInstance(project)
@@ -1885,6 +1886,57 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
         chatInputBar.requestInputFocus()
     }
 
+    // Programmatically send the first user message (used when transitioning from Home panel)
+    fun sendInitialMessage(text: String, model: String = "auto", planMode: Boolean = false) {
+        val modelToUse = if (model == "auto") "" else model
+        
+        // Check if this is a custom command that should skip IDE context
+        val finalText = if (shouldSkipIdeContext(text)) {
+            text
+        } else {
+            buildIdeContextXmlForPanel()?.let { ctx -> "$text\n\n$ctx" } ?: text
+        }
+        
+        // Give immediate visual feedback in the new panel
+        try { chatInputBar.showLoading(text) } catch (_: Exception) {}
+        sessionViewModel.sendPrompt(finalText, modelToUse, planMode)
+    }
+
+    private fun buildIdeContextXmlForPanel(): String? {
+        return try {
+            val fem = com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project)
+            val editor = fem.selectedTextEditor ?: return null
+            val vf = editor.virtualFile ?: return null
+            val base = project.basePath
+            val path = try {
+                if (base != null) {
+                    val rel = java.nio.file.Paths.get(base).relativize(java.nio.file.Paths.get(vf.path)).toString()
+                    xmlEscape(rel)
+                } else xmlEscape(vf.path)
+            } catch (_: Exception) { xmlEscape(vf.path) }
+            val caretLine = editor.caretModel.logicalPosition.line + 1
+            val sel = editor.selectionModel
+            val selAttr = if (sel.hasSelection()) {
+                val startLine = editor.offsetToLogicalPosition(sel.selectionStart).line + 1
+                val endLine = editor.offsetToLogicalPosition(sel.selectionEnd).line + 1
+                " selection_start=\"$startLine\" selection_end=\"$endLine\""
+            } else ""
+            val notePlain = if (sel.hasSelection()) {
+                "IDE context: user is in IntelliJ; focus file '$path'; selection lines ${selAttr.substringAfter("selection_start=\"").substringBefore("\"")} - ${selAttr.substringAfter("selection_end=\"").substringBefore("\"")}"
+            } else {
+                "IDE context: user is in IntelliJ; focus file '$path'; caret at line $caretLine"
+            }
+            val note = xmlEscape(notePlain)
+            "<ide_context note=\"$note\"><file path=\"$path\" caret_line=\"$caretLine\"$selAttr/></ide_context>"
+        } catch (_: Exception) { null }
+    }
+
+    private fun xmlEscape(s: String): String = s
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+
     private data class SessionMenuItem(
         val label: String,
         val type: SessionMenuType,
@@ -2129,6 +2181,31 @@ class ClaudeChatPanel(private val project: Project) : JBPanel<ClaudeChatPanel>()
                 "$formattedLines\n… +$remainingCount lines (show more)"
             }
         }
+    }
+    
+    /**
+     * Check if the message is a custom command that should skip IDE context
+     */
+    private fun shouldSkipIdeContext(text: String): Boolean {
+        val trimmedText = text.trim()
+        
+        // Check if it's a slash command
+        if (!trimmedText.startsWith("/")) {
+            return false
+        }
+        
+        // Extract command name
+        val command = trimmedText.substring(1).split(" ").firstOrNull()?.lowercase() ?: return false
+        
+        // Get all available commands from the registry
+        val slashCommandRegistry = SlashCommandRegistry(project)
+        val allCommands = slashCommandRegistry.getAllCommands()
+        
+        // Check if this is a known command (built-in, project, or user command)
+        val isKnownCommand = allCommands.any { it.name.lowercase() == command }
+        
+        // Skip IDE context for all known custom commands
+        return isKnownCommand
     }
     
 }

@@ -41,6 +41,7 @@ class GenericRenderer : ToolRenderer() {
     override fun renderContent(input: ToolRenderInput): JPanel {
         return when (input.status) {
             ToolStatus.ERROR -> createErrorPanel(input.toolOutput)
+            ToolStatus.IN_PROGRESS -> createInProgressPanel()
             else -> createSuccessPanel(input.toolOutput)
         }
     }
@@ -93,6 +94,26 @@ class GenericRenderer : ToolRenderer() {
                 
                 add(statusLabel, BorderLayout.CENTER)
             }
+        }
+    }
+
+    private fun createInProgressPanel(): JPanel {
+        return JPanel(BorderLayout()).apply {
+            background = JBColor.background()
+            border = JBUI.Borders.empty(8)
+            val row = JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply {
+                background = JBColor.background()
+            }
+            val spinner = javax.swing.JLabel(com.intellij.ui.AnimatedIcon.Default()).apply {
+                foreground = JBColor.foreground()
+            }
+            val label = JBLabel("Running...").apply {
+                foreground = JBColor.namedColor("Link.activeForeground", JBColor(0x589df6, 0x548af7))
+                font = Font(Font.MONOSPACED, Font.PLAIN, 11)
+            }
+            row.add(spinner)
+            row.add(label)
+            add(row, BorderLayout.CENTER)
         }
     }
 }

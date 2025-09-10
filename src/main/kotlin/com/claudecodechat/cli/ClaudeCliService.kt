@@ -88,7 +88,37 @@ class ClaudeCliService(private val project: Project) {
             
             // Set up environment
             val env = processBuilder.environment()
-            
+
+            // Merge environment with the user's shell environment (fixes PATH/NVM/VOLTA visibility when IDE is started from GUI)
+            try {
+                val shellEnv = com.intellij.util.EnvironmentUtil.getEnvironmentMap()
+                if (!shellEnv.isNullOrEmpty()) {
+                    // Prefer shell PATH if present, but keep existing entries as fallback
+                    val mergedPath = buildString {
+                        val parts = mutableListOf<String>()
+                        shellEnv["PATH"]?.let { parts.add(it) }
+                        env["PATH"]?.let { parts.add(it) }
+                        append(parts.joinToString(":"))
+                    }
+                    if (mergedPath.isNotBlank()) env["PATH"] = mergedPath
+                    // Carry over common vars that affect node managers
+                    listOf("NVM_DIR", "VOLTA_HOME", "NODE_HOME").forEach { key ->
+                        shellEnv[key]?.let { env[key] = it }
+                    }
+                }
+            } catch (_: Exception) { }
+
+            // Ensure the directory that contains the Claude binary (and its sibling `node`) is in PATH
+            try {
+                val binDir = File(claudeBinary).parentFile?.absolutePath
+                if (!binDir.isNullOrBlank()) {
+                    val current = env["PATH"] ?: ""
+                    if (!current.split(":").contains(binDir)) {
+                        env["PATH"] = if (current.isBlank()) binDir else "$current:$binDir"
+                    }
+                }
+            } catch (_: Exception) { }
+
             // Add custom environment variables from settings
             parseEnvironmentVariables(settings.environmentVariables).forEach { (key, value) ->
                 env[key] = value

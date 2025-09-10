@@ -284,17 +284,27 @@ class ClaudeChatSimpleToolWindowFactory : ToolWindowFactory, DumbAware {
         val inputBar = com.claudecodechat.ui.swing.ChatInputBar(
             project = project,
             onSend = { text, model, planMode ->
-                // When sending from welcome, transition into a new chat tab
-                toolWindow.contentManager.removeContent(welcomeContent, true)
-                // Use first few words of the input as title
-                val title = if (text.isNotBlank()) {
-                    text.split(" ").take(2).joinToString(" ")
-                } else {
-                    "New"
-                }
-                val chat = addChatContent(project, toolWindow, title = title, sessionId = null)
-                if (text.isNotBlank()) {
-                    chat.appendCodeToInput(text)
+                // When sending from Home, replace Home with a new chat tab and immediately send
+                val cm = toolWindow.contentManager
+                val index = cm.getIndexOfContent(welcomeContent).takeIf { it >= 0 } ?: cm.contentCount
+                val safeText = stripIdeContext(text).trim()
+
+                // Create the chat content first at the same index to avoid toolwindow collapsing
+                val tempPanel = ClaudeChatPanel(project)
+                val displayTitle = shortenTitle(if (safeText.isNotBlank()) safeText else "New", 5)
+                val chatContent = com.intellij.ui.content.ContentFactory.getInstance().createContent(tempPanel, displayTitle, false)
+                chatContent.putUserData(CHAT_PANEL_KEY, tempPanel)
+                chatContent.isCloseable = true
+                cm.addContent(chatContent, index)
+                cm.setSelectedContent(chatContent)
+
+                // Remove the Home content after new chat is present
+                cm.removeContent(welcomeContent, true)
+
+                if (safeText.isNotBlank()) {
+                    // Explicitly begin a fresh session (do not continue previous)
+                    SessionViewModel.getInstance(project).startNewSession()
+                    tempPanel.sendInitialMessage(safeText, model, planMode)
                 }
             },
             onStop = {

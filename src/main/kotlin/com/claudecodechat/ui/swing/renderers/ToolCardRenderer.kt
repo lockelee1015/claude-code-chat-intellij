@@ -11,6 +11,7 @@ import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.ui.JBColor
+import com.intellij.ui.AnimatedIcon
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBPanel
 import com.intellij.ui.components.JBScrollPane
@@ -87,6 +88,16 @@ class ToolCardRenderer {
             
             add(titleLabel, BorderLayout.WEST)
             
+            // In-progress spinner on the right
+            if (status == ToolStatus.IN_PROGRESS) {
+                val spinner = JBLabel(AnimatedIcon.Default()).apply {
+                    foreground = JBColor.foreground()
+                    border = JBUI.Borders.emptyLeft(8)
+                    toolTipText = "Running..."
+                }
+                add(spinner, BorderLayout.EAST)
+            }
+
             // Add debug info if debug mode is enabled
             if (ClaudeSettings.getInstance().debugMode && toolId != null) {
                 val debugLabel = JBLabel("ID: ${toolId.take(8)}").apply {
@@ -101,7 +112,17 @@ class ToolCardRenderer {
                         }
                     })
                 }
-                add(debugLabel, BorderLayout.EAST)
+                // If spinner present, put debug below; otherwise put at EAST
+                if (status == ToolStatus.IN_PROGRESS) {
+                    val debugPanel = JBPanel<JBPanel<*>>(BorderLayout()).apply {
+                        background = getStatusBackgroundColor(status)
+                        border = JBUI.Borders.empty(2, 0, 0, 0)
+                        add(debugLabel, BorderLayout.EAST)
+                    }
+                    add(debugPanel, BorderLayout.SOUTH)
+                } else {
+                    add(debugLabel, BorderLayout.EAST)
+                }
             }
         }
     }
@@ -151,10 +172,20 @@ class ToolCardRenderer {
             }
             
             add(titlePanel, BorderLayout.WEST)
+
+            if (status == ToolStatus.IN_PROGRESS) {
+                val spinner = JBLabel(AnimatedIcon.Default()).apply {
+                    foreground = JBColor.foreground()
+                    border = JBUI.Borders.empty(0, 8, 0, 0)
+                    toolTipText = "Running..."
+                }
+                add(spinner, BorderLayout.EAST)
+            }
             
             // Add Show Diff/Content link for Edit and Write tools
             when (toolName.lowercase()) {
                 in listOf("edit", "multiedit") -> {
+                    if (status == ToolStatus.IN_PROGRESS) return@apply
                     val diffLink = JBLabel("Show Diff").apply {
                         foreground = JBColor.namedColor("Link.activeForeground", JBColor(0x589df6, 0x548af7))
                         font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
@@ -178,6 +209,7 @@ class ToolCardRenderer {
                     add(diffLink, BorderLayout.EAST)
                 }
                 "write" -> {
+                    if (status == ToolStatus.IN_PROGRESS) return@apply
                     val contentLink = JBLabel("Show Content").apply {
                         foreground = JBColor.namedColor("Link.activeForeground", JBColor(0x589df6, 0x548af7))
                         font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
